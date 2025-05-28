@@ -1,0 +1,25 @@
+
+con_cafe <- c(8, 9, 8, 7, 9, 8, 9, 7, 8, 9, 7, 8, 9, 8)
+sin_cafe <- c(5, 4, 6, 5, 4, 6, 5, 3, 4, 6, 5, 4, 5, 5, 4)
+
+# Estadísticas descriptivas
+
+# Promedio del grupo con café
+mean(con_cafe)  
+# Promedio del grupo sin café
+mean(sin_cafe)        
+# Desviación estándar - grupo con café  
+sd(con_cafe)          
+# Desviación estándar - grupo sin café
+sd(sin_cafe)          
+# Varianza - grupo con café
+var(con_cafe)         
+# Varianza - grupo sin café
+var(sin_cafe)         #
+
+# Coeficiente de variación  
+cv <- sd(con_cafe)/mean(con_cafe)*100
+cv
+
+# Prueba t-Student
+t.test(con_cafe, sin_cafe)
