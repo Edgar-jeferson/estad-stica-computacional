@@ -1,0 +1,439 @@
+import csv
+from flask import Flask, request, jsonify, send_file, send_from_directory
+from flask_cors import CORS
+from openai import OpenAI
+import os
+import pandas as pd
+import json
+import io
+import base64
+import numpy as np
+from dotenv import load_dotenv
+from fpdf import FPDF
+import matplotlib.pyplot as plt
+import seaborn as sns
+from io import BytesIO
+import tempfile
+
+app = Flask(__name__)
+CORS(app)  
+
+load_dotenv()  
+    
+client = OpenAI(api_key='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')
+
+current_data = None
+data_summary = None
+def detect_delimiter(file_path, sample_size=1024):
+    with open(file_path, 'r') as f:
+        sample = f.read(sample_size)
+    
+    # Lista de delimitadores comunes a probar
+    delimiters = [',', ';', '\t', '|']
+    
+    delimiter_counts = {delim: sample.count(delim) for delim in delimiters}
+    
+    # Retornar el delimitador con mayor frecuencia
+    return max(delimiter_counts.items(), key=lambda x: x[1])[0]
+def convert_to_serializable(obj):
+    if isinstance(obj, dict):
+        return {k: convert_to_serializable(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [convert_to_serializable(i) for i in obj]
+    elif isinstance(obj, (np.integer, np.int64, np.int32)):
+        return int(obj)
+    elif isinstance(obj, (np.floating, np.float64, np.float32)):
+        return float(obj)
+    elif isinstance(obj, (np.bool_)):
+        return bool(obj)
+    elif pd.isna(obj):
+        return None
+    else:
+        return obj
+@app.route('/')
+def home():
+    try:
+        # Intentar servir index.html desde el directorio actual
+        return send_file('index.html')
+    except FileNotFoundError:
+        # Si no encuentra el archivo, servir desde un directorio templates o static
+        try:
+            return send_from_directory('templates', 'index.html')
+        except FileNotFoundError:
+            try:
+                return send_from_directory('static', 'index.html')
+            except FileNotFoundError:
+                return jsonify({'error': 'index.html no encontrado'}), 404
+
+# Ruta alternativa para servir archivos estáticos
+@app.route('/static/<path:filename>')
+def serve_static(filename):
+    return send_from_directory('static', filename)
+
+@app.route('/upload', methods=['POST'])
+def upload_file():
+    global current_data, data_summary
+    
+    try:
+        if 'file' not in request.files:
+            return jsonify({'success': False, 'error': 'No se proporcionó archivo'}), 400
+        
+        file = request.files['file']
+        if file.filename == '':
+            return jsonify({'success': False, 'error': 'No se seleccionó archivo'}), 400
+        
+        # Validar extensión del archivo
+        filename = file.filename.lower()
+        if not (filename.endswith('.csv') or filename.endswith('.xlsx') or 
+                filename.endswith('.xls') or filename.endswith('.json')):
+            return jsonify({'success': False, 
+                          'error': 'Formato no soportado. Use CSV, Excel o JSON'}), 400
+        
+        # Leer el archivo según su tipo
+        try:
+            if filename.endswith('.csv'):
+                # Guardar temporalmente el archivo para detectar el delimitador
+                temp_path = os.path.join(tempfile.gettempdir(), file.filename)
+                file.save(temp_path)
+                
+                # Detectar delimitador
+                delimiter = detect_delimiter(temp_path)
+                
+                # Leer el CSV con el delimitador detectado
+                current_data = pd.read_csv(temp_path, delimiter=delimiter, quotechar='"')
+                
+                # Eliminar el archivo temporal
+                os.remove(temp_path)
+                
+            elif filename.endswith(('.xlsx', '.xls')):
+                current_data = pd.read_excel(file)
+            elif filename.endswith('.json'):
+                current_data = pd.read_json(file)
+        except Exception as e:
+            return jsonify({'success': False, 
+                          'error': f'Error al leer el archivo: {str(e)}'}), 400
+        
+        # Limpieza básica de datos
+        current_data = current_data.applymap(lambda x: x.strip() if isinstance(x, str) else x)
+        
+        # Generar resumen
+        data_summary = generate_data_summary(current_data)
+        
+        return jsonify({
+            'success': True,
+            'summary': convert_to_serializable(data_summary),
+            'message': 'Archivo procesado correctamente',
+            'delimiter': delimiter if filename.endswith('.csv') else None
+        })
+        
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+@app.route('/get_data', methods=['GET'])
+def get_data():
+    global current_data
+    
+    if current_data is None:
+        return jsonify({'error': 'No hay datos cargados'}), 400
+    
+    try:
+        # Convertir DataFrame a formato JSON
+        data = current_data.head(1000).to_dict(orient='records')  # Limitar a 1000 filas por rendimiento
+        return jsonify({
+            'success': True,
+            'data': convert_to_serializable(data),
+            'message': 'Datos obtenidos correctamente'
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+def generate_data_summary(df):
+    """Genera un resumen automático de los datos"""
+    summary = {
+        'rows': len(df),
+        'columns': len(df.columns),
+        'numeric_columns': len(df.select_dtypes(include=['number']).columns),
+        'null_values': df.isnull().sum().sum(),
+        'column_info': {},
+        'basic_stats': {}
+    }
+    
+    # Información de cada columna
+    for col in df.columns:
+        col_type = str(df[col].dtype)
+        summary['column_info'][col] = {
+            'type': col_type,
+            'null_count': df[col].isnull().sum(),
+            'unique_values': df[col].nunique()
+        }
+        
+        # Estadísticas básicas para columnas numéricas
+        if df[col].dtype in ['int64', 'float64']:
+            summary['basic_stats'][col] = {
+                'mean': round(df[col].mean(), 2) if not df[col].isnull().all() else None,
+                'median': round(df[col].median(), 2) if not df[col].isnull().all() else None,
+                'std': round(df[col].std(), 2) if not df[col].isnull().all() else None,
+                'min': df[col].min() if not df[col].isnull().all() else None,
+                'max': df[col].max() if not df[col].isnull().all() else None
+            }
+    
+    return summary
+
+@app.route('/chat', methods=['POST'])
+def chat():
+    global current_data, data_summary
+    
+    try:
+        data = request.get_json()
+        user_message = data.get('message', '')
+        
+        if not user_message:
+            return jsonify({'error': 'No message provided'}), 400
+        
+        # Crear contexto con información de los datos
+        context = create_data_context()
+        
+        # Preparar el prompt para OpenAI
+        system_prompt = f"""Eres un asistente experto en análisis de datos. 
+        
+Información actual del dataset:
+{context}
+
+Responde de manera clara y útil a las preguntas sobre los datos. 
+Si el usuario pide gráficos o visualizaciones, describe qué tipo de gráfico sería adecuado.
+Si pide cálculos específicos, realízalos basándote en la información disponible.
+
+Mantén las respuestas concisas pero informativas."""
+
+        # Llamada a OpenAI
+        response = client.chat.completions.create(
+            model="gpt-4o",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_message}
+            ],
+            max_tokens=500,
+            temperature=0.7
+        )
+        
+        bot_response = response.choices[0].message.content
+        
+        return jsonify({
+            'success': True,
+            'response': bot_response
+        })
+        
+    except Exception as e:
+        return jsonify({'error': f'Error en el chat: {str(e)}'}), 500
+
+def create_data_context():
+    """Crea un contexto con información relevante de los datos"""
+    if current_data is None or data_summary is None:
+        return "No hay datos cargados actualmente."
+    
+    context = f"""
+Dataset cargado:
+- Filas: {data_summary['rows']:,}
+- Columnas: {data_summary['columns']}
+- Columnas numéricas: {data_summary['numeric_columns']}
+- Valores nulos: {data_summary['null_values']:,}
+
+Columnas disponibles:
+"""
+    
+    for col, info in data_summary['column_info'].items():
+        context += f"- {col} ({info['type']}): {info['unique_values']} valores únicos, {info['null_count']} nulos\n"
+    
+    if data_summary['basic_stats']:
+        context += "\nEstadísticas básicas de columnas numéricas:\n"
+        for col, stats in data_summary['basic_stats'].items():
+            if stats['mean'] is not None:
+                context += f"- {col}: Media={stats['mean']}, Mediana={stats['median']}, Min={stats['min']}, Max={stats['max']}\n"
+    
+    return context
+
+@app.route('/analyze/<analysis_type>', methods=['POST'])
+def analyze_data(analysis_type):
+    """Endpoint para análisis específicos"""
+    global current_data
+    
+    if current_data is None:
+        return jsonify({'error': 'No data loaded'}), 400
+    
+    try:
+        if analysis_type == 'correlation':
+            # Calcular matriz de correlación
+            numeric_data = current_data.select_dtypes(include=['number'])
+            if numeric_data.empty:
+                return jsonify({'error': 'No numeric columns found'}), 400
+            
+            correlation_matrix = numeric_data.corr()
+            return jsonify({
+                'success': True,
+                'data': correlation_matrix.to_dict(),
+                'type': 'correlation'
+            })
+            
+        elif analysis_type == 'summary':
+            # Estadísticas descriptivas
+            return jsonify({
+                'success': True,
+                'data': data_summary,
+                'type': 'summary'
+            })
+            
+        else:
+            return jsonify({'error': 'Análisis no soportado'}), 400
+            
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/health', methods=['GET'])
+def health_check():
+    """Endpoint para verificar que el servidor está funcionando"""
+    return jsonify({'status': 'OK', 'message': 'Servidor funcionando correctamente'})
+
+@app.route('/generate_pdf', methods=['POST'])
+def generate_pdf():
+    global current_data, data_summary
+    
+    try:
+        # Crear PDF
+        pdf = FPDF()
+        pdf.add_page()
+        pdf.set_font("Arial", size=12)
+        
+        # Título
+        pdf.set_font("Arial", 'B', 16)
+        pdf.cell(200, 10, txt="Informe de Análisis Estadístico Completo", ln=1, align='C')
+        pdf.ln(10)
+        
+        # Obtener análisis estructurado de IA
+        response = client.chat.completions.create(
+            model="gpt-4o",
+            messages=[
+                {"role": "system", "content": f"""Eres un estadístico profesional. Genera un informe detallado con este formato exacto:
+
+# ANÁLISIS ESTADÍSTICO COMPLETO
+
+## 1. Análisis Exploratorio
+### Resumen Descriptivo
+[Incluir medidas de tendencia central y dispersión para cada variable numérica]
+
+### Distribución de Datos
+[Descripción de distribuciones con histogramas sugeridos]
+
+### Valores Atípicos
+[Identificación usando método IQR o Grubbs]
+
+### Datos Faltantes
+[Análisis y recomendaciones de tratamiento]
+
+## 2. Pruebas Estadísticas
+### Normalidad
+[Resultados de Shapiro-Wilk/Kolmogorov-Smirnov]
+
+### Correlaciones
+[Matriz de correlaciones con Pearson/Spearman]
+
+### Homogeneidad de Varianza
+[Resultados de Levene/Bartlett]
+
+### Pruebas de Hipótesis
+[t-test, ANOVA o pruebas no paramétricas aplicables]
+
+### Análisis de Regresión
+[Modelos sugeridos con parámetros clave]
+
+## 3. Interpretación de Resultados
+### Significancia Estadística
+[Comparación con umbrales estándar]
+
+### Patrones Clave
+[Hallazgos principales con implicaciones prácticas]
+
+### Limitaciones
+[Advertencias sobre posibles sesgos o limitaciones]
+
+Usa formato markdown con:
+- Viñetas para listas
+- Negritas para términos clave
+- Valores numéricos con 2 decimales
+- Interpretaciones claras y concisas"""},
+                {"role": "user", "content": "Genera el informe completo para este dataset"}
+            ],
+            max_tokens=2000,
+            temperature=0.3
+        )
+        
+        analysis = response.choices[0].message.content
+        
+        # Procesar el análisis para el PDF
+        pdf.set_font("Arial", size=12)
+        
+        # Dividir el análisis en secciones
+        sections = analysis.split('## ')
+        for section in sections:
+            if not section.strip():
+                continue
+                
+            # Título de sección
+            title = section.split('\n')[0]
+            pdf.set_font("Arial", 'B', 14)
+            pdf.cell(200, 10, txt=title, ln=1)
+            
+            # Contenido
+            content = '\n'.join(section.split('\n')[1:])
+            pdf.set_font("Arial", size=12)
+            pdf.multi_cell(0, 8, txt=content.strip())
+            pdf.ln(5)
+        
+        # Agregar gráficos estadísticos
+        if current_data is not None:
+            numeric_cols = current_data.select_dtypes(include=['number']).columns
+            
+            # Gráficos de distribución
+            pdf.set_font("Arial", 'B', 14)
+            pdf.cell(200, 10, txt="Visualizaciones Estadísticas", ln=1)
+            
+            for col in numeric_cols[:3]:  # Máximo 3 gráficos
+                # Histograma
+                plt.figure(figsize=(6, 4))
+                sns.histplot(current_data[col].dropna(), kde=True)
+                plt.title(f'Distribución de {col}')
+                plt.tight_layout()
+                
+                with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmpfile:
+                    plt.savefig(tmpfile.name, dpi=150)
+                    plt.close()
+                    pdf.image(tmpfile.name, x=10, w=180)
+                    pdf.ln(5)
+                
+                # Boxplot
+                plt.figure(figsize=(6, 4))
+                sns.boxplot(x=current_data[col].dropna())
+                plt.title(f'Boxplot de {col}')
+                plt.tight_layout()
+                
+                with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmpfile:
+                    plt.savefig(tmpfile.name, dpi=150)
+                    plt.close()
+                    pdf.image(tmpfile.name, x=10, w=180)
+                    pdf.ln(5)
+        
+        # Guardar PDF
+        pdf_output = BytesIO()
+        pdf.output(pdf_output)
+        pdf_output.seek(0)
+        
+        return send_file(
+            pdf_output,
+            mimetype='application/pdf',
+            as_attachment=True,
+            download_name='analisis_estadistico_completo.pdf'
+        )
+        
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+if __name__ == '__main__':
+    app.run(debug=True, port=5000)
