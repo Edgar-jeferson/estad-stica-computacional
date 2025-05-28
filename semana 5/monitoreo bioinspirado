@@ -1,1 +1,320 @@
+import numpy as np
+import matplotlib.pyplot as plt
+import matplotlib.animation as animation
+from matplotlib.patches import Circle
+import random
+import math
 
+class Presa:
+    def __init__(self, x, y, velocidad_max=2.0):
+        self.x = x
+        self.y = y
+        self.vx = 0
+        self.vy = 0
+        self.velocidad_max = velocidad_max
+        self.energia = 100
+        self.viva = True
+        self.radio_deteccion = 8.0
+        
+    def detectar_depredadores(self, lobos):
+        """Detecta lobos cercanos"""
+        depredadores_cercanos = []
+        for lobo in lobos:
+            distancia = math.sqrt((self.x - lobo.x)**2 + (self.y - lobo.y)**2)
+            if distancia < self.radio_deteccion:
+                depredadores_cercanos.append(lobo)
+        return depredadores_cercanos
+    
+    def huir(self, depredadores):
+        """Comportamiento de huida"""
+        if not depredadores:
+            return
+            
+        # Calcular dirección promedio de escape
+        escape_x, escape_y = 0, 0
+        for dep in depredadores:
+            dx = self.x - dep.x
+            dy = self.y - dep.y
+            dist = math.sqrt(dx**2 + dy**2)
+            if dist > 0:
+                escape_x += dx / dist
+                escape_y += dy / dist
+                
+        # Normalizar y aplicar velocidad
+        if escape_x != 0 or escape_y != 0:
+            norm = math.sqrt(escape_x**2 + escape_y**2)
+            self.vx = (escape_x / norm) * self.velocidad_max
+            self.vy = (escape_y / norm) * self.velocidad_max
+    
+    def mover(self, limites):
+        """Actualiza posición"""
+        self.x += self.vx
+        self.y += self.vy
+        
+        # Rebote en bordes
+        if self.x <= 0 or self.x >= limites[0]:
+            self.vx *= -1
+            self.x = max(0, min(limites[0], self.x))
+        if self.y <= 0 or self.y >= limites[1]:
+            self.vy *= -1
+            self.y = max(0, min(limites[1], self.y))
+            
+        # Reducir velocidad gradualmente
+        self.vx *= 0.95
+        self.vy *= 0.95
+
+class Lobo:
+    def __init__(self, x, y, rol="cazador", velocidad_max=1.8):
+        self.x = x
+        self.y = y
+        self.vx = 0
+        self.vy = 0
+        self.velocidad_max = velocidad_max
+        self.rol = rol  # "alfa", "cazador", "acorralador"
+        self.energia = 100
+        self.radio_comunicacion = 12.0
+        self.radio_ataque = 1.5
+        self.target = None
+        
+    def comunicarse(self, manada):
+        """Comunicación entre lobos para coordinar"""
+        lobos_cercanos = []
+        for lobo in manada:
+            if lobo != self:
+                distancia = math.sqrt((self.x - lobo.x)**2 + (self.y - lobo.y)**2)
+                if distancia < self.radio_comunicacion:
+                    lobos_cercanos.append(lobo)
+        return lobos_cercanos
+    
+    def calcular_posicion_flanqueo(self, presa, otros_lobos):
+        """Calcula posición óptima para flanquear"""
+        if not presa:
+            return 0, 0
+            
+        # Posición deseada basada en rol
+        angulo_base = math.atan2(presa.y - self.y, presa.x - self.x)
+        
+        if self.rol == "alfa":
+            # El alfa ataca directamente
+            target_x = presa.x
+            target_y = presa.y
+        elif self.rol == "acorralador":
+            # Los acorraladores se posicionan en los flancos
+            offset_angulo = random.choice([-math.pi/2, math.pi/2])
+            distancia_flanco = 6.0
+            target_x = presa.x + math.cos(angulo_base + offset_angulo) * distancia_flanco
+            target_y = presa.y + math.sin(angulo_base + offset_angulo) * distancia_flanco
+        else:  # cazador normal
+            # Se posiciona para cortar rutas de escape
+            target_x = presa.x + presa.vx * 3  # Predicción de movimiento
+            target_y = presa.y + presa.vy * 3
+            
+        return target_x, target_y
+    
+    def perseguir(self, presa, manada):
+        """Comportamiento de persecución coordinada"""
+        if not presa or not presa.viva:
+            return
+            
+        # Calcular posición objetivo
+        target_x, target_y = self.calcular_posicion_flanqueo(presa, manada)
+        
+        # Movimiento hacia el objetivo
+        dx = target_x - self.x
+        dy = target_y - self.y
+        distancia = math.sqrt(dx**2 + dy**2)
+        
+        if distancia > 0:
+            # Ajustar velocidad según rol y distancia
+            velocidad_factor = 1.0
+            if self.rol == "alfa":
+                velocidad_factor = 1.2
+            elif distancia < 3.0:  # Velocidad reducida cuando está cerca
+                velocidad_factor = 0.6
+                
+            self.vx = (dx / distancia) * self.velocidad_max * velocidad_factor
+            self.vy = (dy / distancia) * self.velocidad_max * velocidad_factor
+    
+    def atacar(self, presa):
+        """Intento de ataque"""
+        if not presa or not presa.viva:
+            return False
+            
+        distancia = math.sqrt((self.x - presa.x)**2 + (self.y - presa.y)**2)
+        if distancia < self.radio_ataque:
+            # Probabilidad de éxito del ataque
+            exito = random.random() < 0.3
+            if exito:
+                presa.energia -= 30
+                if presa.energia <= 0:
+                    presa.viva = False
+                return True
+        return False
+    
+    def mover(self, limites):
+        """Actualiza posición"""
+        self.x += self.vx
+        self.y += self.vy
+        
+        # Mantener dentro de límites
+        self.x = max(0, min(limites[0], self.x))
+        self.y = max(0, min(limites[1], self.y))
+
+class SimulacionCaza:
+    def __init__(self, ancho=50, alto=40):
+        self.ancho = ancho
+        self.alto = alto
+        self.lobos = []
+        self.presas = []
+        self.tiempo = 0
+        self.estadisticas = {
+            'capturas': 0,
+            'tiempo_caza': [],
+            'distancias_recorridas': []
+        }
+        
+        self.inicializar_simulacion()
+    
+    def inicializar_simulacion(self):
+        """Configura el estado inicial"""
+        # Crear manada de lobos con roles
+        roles = ["alfa", "cazador", "cazador", "acorralador", "acorralador"]
+        for i, rol in enumerate(roles):
+            x = random.uniform(5, 15)
+            y = random.uniform(5, self.alto-5)
+            self.lobos.append(Lobo(x, y, rol))
+            
+        # Crear presas
+        for _ in range(3):
+            x = random.uniform(self.ancho-15, self.ancho-5)
+            y = random.uniform(5, self.alto-5)
+            self.presas.append(Presa(x, y))
+    
+    def paso_simulacion(self):
+        """Ejecuta un paso de la simulación"""
+        self.tiempo += 1
+        
+        # Actualizar presas
+        for presa in self.presas:
+            if presa.viva:
+                depredadores = presa.detectar_depredadores(self.lobos)
+                presa.huir(depredadores)
+                presa.mover((self.ancho, self.alto))
+        
+        # Actualizar lobos
+        presas_vivas = [p for p in self.presas if p.viva]
+        if presas_vivas:
+            # Asignar objetivos (todos los lobos van por la presa más cercana al alfa)
+            alfa = next((l for l in self.lobos if l.rol == "alfa"), self.lobos[0])
+            if presas_vivas:
+                objetivo = min(presas_vivas, 
+                             key=lambda p: math.sqrt((alfa.x-p.x)**2 + (alfa.y-p.y)**2))
+                
+                for lobo in self.lobos:
+                    lobo.perseguir(objetivo, self.lobos)
+                    lobo.mover((self.ancho, self.alto))
+                    
+                    # Intentar ataque
+                    if lobo.atacar(objetivo):
+                        self.estadisticas['capturas'] += 1
+    
+    def crear_animacion(self):
+        """Crea la animación de la simulación"""
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 6))
+        
+        # Configurar el área de simulación
+        ax1.set_xlim(0, self.ancho)
+        ax1.set_ylim(0, self.alto)
+        ax1.set_aspect('equal')
+        ax1.set_title('Simulación de Caza en Manada')
+        ax1.set_xlabel('Posición X')
+        ax1.set_ylabel('Posición Y')
+        
+        # Elementos gráficos
+        lobo_puntos = ax1.scatter([], [], c='red', s=100, marker='^', label='Lobos')
+        presa_puntos = ax1.scatter([], [], c='brown', s=80, marker='o', label='Presas')
+        alfa_punto = ax1.scatter([], [], c='darkred', s=150, marker='^', 
+                                edgecolors='gold', linewidth=2, label='Alfa')
+        
+        # Círculos de comunicación (opcional, para visualizar)
+        circulos_comunicacion = []
+        
+        ax1.legend()
+        ax1.grid(True, alpha=0.3)
+        
+        # Gráfico de estadísticas
+        ax2.set_title('Estadísticas de Caza')
+        ax2.set_xlabel('Tiempo')
+        ax2.set_ylabel('Número de Capturas Acumuladas')
+        linea_capturas, = ax2.plot([], [], 'g-', linewidth=2)
+        ax2.grid(True, alpha=0.3)
+        
+        # Datos para estadísticas
+        tiempos = []
+        capturas_acum = []
+        
+        def animar(frame):
+            # Ejecutar simulación
+            self.paso_simulacion()
+            
+            # Actualizar posiciones de lobos
+            lobos_x = [l.x for l in self.lobos]
+            lobos_y = [l.y for l in self.lobos]
+            lobo_puntos.set_offsets(np.column_stack((lobos_x, lobos_y)))
+            
+            # Destacar alfa
+            alfa = next((l for l in self.lobos if l.rol == "alfa"), self.lobos[0])
+            alfa_punto.set_offsets([[alfa.x, alfa.y]])
+            
+            # Actualizar posiciones de presas
+            presas_vivas = [p for p in self.presas if p.viva]
+            if presas_vivas:
+                presas_x = [p.x for p in presas_vivas]
+                presas_y = [p.y for p in presas_vivas]
+                presa_puntos.set_offsets(np.column_stack((presas_x, presas_y)))
+            else:
+                presa_puntos.set_offsets(np.empty((0, 2)))
+            
+            # Actualizar estadísticas
+            tiempos.append(self.tiempo)
+            capturas_acum.append(self.estadisticas['capturas'])
+            
+            if len(tiempos) > 1:
+                linea_capturas.set_data(tiempos, capturas_acum)
+                ax2.set_xlim(0, max(tiempos))
+                ax2.set_ylim(0, max(capturas_acum) + 1 if capturas_acum else 1)
+            
+            return lobo_puntos, presa_puntos, alfa_punto, linea_capturas
+        
+        # Crear animación
+        anim = animation.FuncAnimation(fig, animar, frames=500, 
+                                     interval=100, blit=False, repeat=True)
+        
+        plt.tight_layout()
+        return fig, anim
+
+def ejecutar_simulacion():
+    """Función principal para ejecutar la simulación"""
+    print("Iniciando simulación de caza de lobos en manada...")
+    print("Roles de los lobos:")
+    print("- Alfa (rojo con borde dorado): Lidera el ataque directo")
+    print("- Cazadores (rojo): Persiguen y predicen movimientos")
+    print("- Acorraladores (rojo): Se posicionan en flancos")
+    print("\nPresiona Ctrl+C para detener la simulación")
+    
+    sim = SimulacionCaza()
+    fig, anim = sim.crear_animacion()
+    
+    try:
+        plt.show()
+    except KeyboardInterrupt:
+        print(f"\nSimulación detenida.")
+        print(f"Estadísticas finales:")
+        print(f"- Tiempo total: {sim.tiempo} pasos")
+        print(f"- Capturas totales: {sim.estadisticas['capturas']}")
+        
+    return sim
+
+# Ejecutar simulación
+if __name__ == "__main__":
+    simulacion = ejecutar_simulacion()
