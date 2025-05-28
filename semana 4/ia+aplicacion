@@ -1,1 +1,1400 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Analizador Inteligente de Datos</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/plotly.js/2.26.0/plotly.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Arial', sans-serif;
+            background-color: #f5f7fa;
+            color: #333;
+            line-height: 1.6;
+        }
+
+        /* Header */
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 1rem 2rem;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+
+        .header-content {
+            max-width: 1200px;
+            margin: 0 auto;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .logo {
+            font-size: 1.5rem;
+            font-weight: bold;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .user-section {
+            display: flex;
+            gap: 1rem;
+            align-items: center;
+        }
+
+        /* Main Container */
+        .container {
+            max-width: 1400px;
+            margin: 2rem ;
+            padding: 0 1rem;
+            display: grid;
+            grid-template-columns: 1fr 2fr;
+            gap: 1.5rem;
+            min-height: 600px;
+        }
+
+        .left-column {
+            display: flex;
+            flex-direction: column;
+            gap: 1.5rem;
+        }
+
+        .right-column {
+          
+            flex-direction: column;
+            gap: 1.5rem;
+        }
+
+        /* Cards */
+        .card {
+            background: white;
+            border-radius: 10px;
+            padding: 1.5rem;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+            transition: transform 0.3s ease;
+        }
+
+        .card:hover {
+            transform: translateY(-5px);
+        }
+
+        .card-title {
+            font-size: 1.25rem;
+            font-weight: bold;
+            margin-bottom: 1rem;
+            color: #4a5568;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        /* Upload Section */
+        .upload-zone {
+            border: 2px dashed #cbd5e0;
+            border-radius: 8px;
+            padding: 2rem;
+            text-align: center;
+            transition: all 0.3s ease;
+            cursor: pointer;
+            min-height: 200px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .upload-zone:hover {
+            border-color: #667eea;
+            background-color: #f7fafc;
+        }
+
+        .upload-zone.dragover {
+            border-color: #667eea;
+            background-color: #edf2f7;
+        }
+
+        .upload-icon {
+            font-size: 3rem;
+            color: #a0aec0;
+            margin-bottom: 1rem;
+        }
+
+        .upload-text {
+            color: #718096;
+            margin-bottom: 1rem;
+        }
+
+        .file-types {
+            font-size: 0.9rem;
+            color: #a0aec0;
+            margin-bottom: 1rem;
+        }
+
+        #fileInput {
+            display: none;
+        }
+
+        .upload-btn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 0.75rem 1.5rem;
+            border-radius: 5px;
+            cursor: pointer;
+            font-weight: bold;
+            transition: all 0.3s ease;
+        }
+
+        .upload-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+        }
+
+        /* Stats Section */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .stat-item {
+            background: #f8fafc;
+            padding: 1rem;
+            border-radius: 6px;
+            text-align: center;
+        }
+
+        .stat-value {
+            font-size: 1.5rem;
+            font-weight: bold;
+            color: #667eea;
+        }
+
+        .stat-label {
+            font-size: 0.9rem;
+            color: #718096;
+        }
+
+        /* Chart Controls */
+        .chart-controls {
+            display: flex;
+            gap: 1rem;
+            margin-bottom: 1rem;
+            flex-wrap: wrap;
+        }
+
+        .chart-select {
+            flex: 1;
+            min-width: 150px;
+            padding: 0.5rem;
+            border: 1px solid #e2e8f0;
+            border-radius: 5px;
+            background: white;
+        }
+
+        .generate-chart-btn {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 0.5rem 1rem;
+            border-radius: 5px;
+            cursor: pointer;
+            font-weight: bold;
+            transition: all 0.3s ease;
+        }
+
+        .generate-chart-btn:hover {
+            background: #5a6fd9;
+        }
+
+        .generate-chart-btn:disabled {
+            background: #a0aec0;
+            cursor: not-allowed;
+        }
+
+        /* Chart Container */
+        .chart-container {
+            background: white;
+            border-radius: 6px;
+            min-height: 400px;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .chart-tabs {
+            display: flex;
+            border-bottom: 1px solid #e2e8f0;
+            padding: 0 1rem;
+        }
+
+        .chart-tab {
+            padding: 0.75rem 1.5rem;
+            cursor: pointer;
+            border-bottom: 2px solid transparent;
+            transition: all 0.3s ease;
+        }
+
+        .chart-tab.active {
+            border-bottom-color: #667eea;
+            color: #667eea;
+            font-weight: bold;
+        }
+
+        .chart-tab:hover {
+            background: #f8fafc;
+        }
+
+        .chart-content {
+            flex: 1;
+            padding: 1rem;
+            position: relative;
+        }
+
+        .chart-placeholder {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 300px;
+            color: #a0aec0;
+            text-align: center;
+        }
+
+        /* Chatbot Section */
+        .chatbot-container {
+            display: flex;
+            flex-direction: column;
+            height: 500px;
+        }
+
+        .chat-messages {
+            flex: 1;
+            overflow-y: auto;
+            padding: 1rem;
+            background: #f8fafc;
+            border-radius: 6px;
+            margin-bottom: 1rem;
+            border: 1px solid #e2e8f0;
+        }
+
+        .message {
+            margin-bottom: 1rem;
+            padding: 0.75rem;
+            border-radius: 8px;
+            max-width: 80%;
+        }
+
+        .message.user {
+            background: #667eea;
+            color: white;
+            margin-left: auto;
+        }
+
+        .message.bot {
+            background: #e2e8f0;
+            color: #2d3748;
+        }
+
+        .chat-input-container {
+            display: flex;
+            gap: 0.5rem;
+        }
+
+        .chat-input {
+            flex: 1;
+            padding: 0.75rem;
+            border: 1px solid #e2e8f0;
+            border-radius: 5px;
+            outline: none;
+            transition: border-color 0.3s ease;
+        }
+
+        .chat-input:focus {
+            border-color: #667eea;
+        }
+
+        .send-btn {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 0.75rem 1.25rem;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .send-btn:hover {
+            background: #5a6fd9;
+        }
+
+        .send-btn:disabled {
+            background: #a0aec0;
+            cursor: not-allowed;
+        }
+
+        /* Loading states */
+        .loading {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            color: #667eea;
+        }
+
+        .spinner {
+            border: 2px solid #e2e8f0;
+            border-top: 2px solid #667eea;
+            border-radius: 50%;
+            width: 20px;
+            height: 20px;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .container {
+                grid-template-columns: 1fr;
+                gap: 1rem;
+            }
+            
+            .header-content {
+                flex-direction: column;
+                gap: 1rem;
+            }
+
+            .chart-controls {
+                flex-direction: column;
+            }
+
+            .chart-tabs {
+                overflow-x: auto;
+            }
+        }
+
+        @media (max-width: 1024px) {
+            .container {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- Header -->
+    <header class="header">
+        <div class="header-content">
+            <div class="logo">
+                <i class="fas fa-chart-line"></i>
+                Analizador Inteligente de Datos
+            </div>
+            <div class="user-section">
+                <span>FINESI</span>
+                
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Container -->
+    <main class="container">
+        <!-- Left Column -->
+        <div class="left-column">
+            <!-- Upload Section -->
+            <section class="card">
+                <h2 class="card-title">
+                    <i class="fas fa-upload"></i>
+                    Subir Datos
+                </h2>
+                <div class="upload-zone" id="uploadZone">
+                    <div class="upload-icon">
+                        <i class="fas fa-cloud-upload-alt"></i>
+                    </div>
+                    <div class="upload-text">
+                        Arrastra y suelta tu archivo aquí
+                    </div>
+                    <div class="file-types">
+                        Formatos soportados: CSV, Excel, JSON
+                    </div>
+                    <input type="file" id="fileInput" accept=".csv,.xlsx,.xls,.json">
+                    <button class="upload-btn" onclick="document.getElementById('fileInput').click()">
+                        <i class="fas fa-file-upload"></i>
+                        Seleccionar Archivo
+                    </button>
+                </div>
+                <div id="fileInfo" style="margin-top: 1rem; display: none;">
+                    <p><strong>Archivo:</strong> <span id="fileName"></span></p>
+                    <p><strong>Tamaño:</strong> <span id="fileSize"></span></p>
+                    <p><strong>Tipo:</strong> <span id="fileType"></span></p>
+                </div>
+            </section>
+
+            <!-- Statistics Section -->
+            <section class="card">
+                <div style="margin-top: 1rem; display: flex; gap: 1rem;">
+                    <button class="upload-btn" id="exportPdfBtn" style="background: #e53e3e;">
+                        <i class="fas fa-file-pdf"></i> Exportar PDF
+                    </button>
+                    
+                </div>
+                <h2 class="card-title">
+                    <i class="fas fa-info-circle"></i>
+                    Estadísticas
+                </h2>
+                <div class="stats-grid" id="statsGrid" style="display: none;">
+                    <div class="stat-item">
+                        <div class="stat-value" id="rowCount">-</div>
+                        <div class="stat-label">Filas</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value" id="colCount">-</div>
+                        <div class="stat-label">Columnas</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value" id="numericCols">-</div>
+                        <div class="stat-label">Columnas Numéricas</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value" id="nullValues">-</div>
+                        <div class="stat-label">Valores Nulos</div>
+                    </div>
+                </div>
+                <div id="columnInfo" style="display: none;">
+                    <h4 style="margin-bottom: 1rem; color: #667eea;">📊 Información de Columnas</h4>
+                    <div id="columnList" style="max-height: 200px; overflow-y: auto;"></div>
+                </div>
+            </section>
+
+            <!-- Chatbot Section -->
+            <section class="card">
+                <h2 class="card-title">
+                    <i class="fas fa-robot"></i>
+                    Asistente IA
+                </h2>
+                <div class="chatbot-container">
+                    <div class="chat-messages" id="chatMessages">
+                        <div class="message bot">
+                            ¡Hola! Soy tu asistente de análisis de datos. Sube un archivo y podrás preguntarme sobre estadísticas, correlaciones, gráficos y más. ¿En qué puedo ayudarte?
+                        </div>
+                    </div>
+                    <div class="chat-input-container">
+                        <input 
+                            type="text" 
+                            class="chat-input" 
+                            id="chatInput" 
+                            placeholder="Pregúntame sobre tus datos..."
+                            disabled
+                        >
+                        <button class="send-btn" id="sendBtn" disabled>
+                            <i class="fas fa-paper-plane"></i>
+                        </button>
+                    </div>
+                </div>
+            </section>
+        </div>
+
+        <!-- Right Column -->
+        <div class="right-column">
+            <!-- Charts Section -->
+            <section class="card" style="flex: 1;">
+                <h2 class="card-title">
+                    <i class="fas fa-chart-bar"></i>
+                    Visualizaciones
+                </h2>
+                
+                <!-- Chart Controls -->
+                <div class="chart-controls" id="chartControls" style="display: none;">
+                    <select class="chart-select" id="chartType">
+                        <option value="">Seleccionar tipo de gráfico</option>
+                        <option value="bar">Gráfico de Barras</option>
+                        <option value="line">Gráfico de Líneas</option>
+                        <option value="pie">Gráfico Circular</option>
+                        <option value="scatter">Diagrama de Dispersión</option>
+                        <option value="histogram">Histograma</option>
+                        <option value="heatmap">Mapa de Calor</option>
+                    </select>
+                    <select class="chart-select" id="xAxis">
+                        <option value="">Seleccionar eje X</option>
+                    </select>
+                    <select class="chart-select" id="yAxis">
+                        <option value="">Seleccionar eje Y</option>
+                    </select>
+                    <button class="generate-chart-btn" id="generateChart" onclick="generateChart()">
+                        <i class="fas fa-chart-line"></i>
+                        Generar
+                    </button>
+                </div>
+
+                <!-- Chart Tabs -->
+                <div class="chart-tabs" id="chartTabs" style="display: none;">
+                    <div class="chart-tab active" data-tab="chart1" onclick="switchTab('chart1')">
+                        Gráfico 1
+                    </div>
+                    <div class="chart-tab" data-tab="chart2" onclick="switchTab('chart2')">
+                        Gráfico 2
+                    </div>
+                    <div class="chart-tab" data-tab="chart3" onclick="switchTab('chart3')">
+                        Gráfico 3
+                    </div>
+                </div>
+
+                <!-- Chart Container -->
+                <div class="chart-container">
+                    <div class="chart-content" id="chartContent">
+                        <div class="chart-placeholder">
+                            <i class="fas fa-chart-pie" style="font-size: 3rem; margin-bottom: 1rem;"></i>
+                            <p>Sube datos para generar visualizaciones interactivas</p>
+                            <small style="margin-top: 0.5rem; opacity: 0.7;">
+                                Compatible con Chart.js y Plotly para gráficos dinámicos
+                            </small>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </div>
+    </main>
+
+    <script>
+        let uploadedData = null;
+        let processedData = null;
+        let currentCharts = {};
+        let activeTab = 'chart1';
+        
+        // Upload functionality
+        const uploadZone = document.getElementById('uploadZone');
+        const fileInput = document.getElementById('fileInput');
+        const fileInfo = document.getElementById('fileInfo');
+        const chatInput = document.getElementById('chatInput');
+        const sendBtn = document.getElementById('sendBtn');
+
+        // Drag and drop handlers
+        uploadZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            uploadZone.classList.add('dragover');
+        });
+
+        uploadZone.addEventListener('dragleave', () => {
+            uploadZone.classList.remove('dragover');
+        });
+
+        uploadZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadZone.classList.remove('dragover');
+            const files = e.dataTransfer.files;
+            if (files.length > 0) {
+                handleFileUpload(files[0]);
+            }
+        });
+
+        fileInput.addEventListener('change', (e) => {
+            if (e.target.files.length > 0) {
+                handleFileUpload(e.target.files[0]);
+            }
+        });
+
+        // Simulate CSV parsing (in production, you'd use Papa Parse or similar)
+        function parseCSV(text) {
+            const lines = text.split('\n').filter(line => line.trim());
+            const headers = lines[0].split(',').map(h => h.trim().replace(/"/g, ''));
+            const rows = [];
+            
+            for (let i = 1; i < lines.length; i++) {
+                const values = lines[i].split(',').map(v => v.trim().replace(/"/g, ''));
+                const row = {};
+                headers.forEach((header, index) => {
+                    let value = values[index] || '';
+                    // Try to parse as number
+                    const numValue = parseFloat(value);
+                    row[header] = !isNaN(numValue) && value !== '' ? numValue : value;
+                });
+                rows.push(row);
+            }
+            
+            return { headers, rows };
+        }
+
+        // Generate sample data for demonstration
+        function generateSampleData() {
+            const headers = ['Mes', 'Ventas', 'Costos', 'Categoria', 'Region'];
+            const meses = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio'];
+            const categorias = ['Tecnología', 'Hogar', 'Deportes', 'Moda'];
+            const regiones = ['Norte', 'Sur', 'Este', 'Oeste'];
+            
+            const rows = [];
+            for (let i = 0; i < 50; i++) {
+                rows.push({
+                    Mes: meses[Math.floor(Math.random() * meses.length)],
+                    Ventas: Math.floor(Math.random() * 10000) + 1000,
+                    Costos: Math.floor(Math.random() * 5000) + 500,
+                    Categoria: categorias[Math.floor(Math.random() * categorias.length)],
+                    Region: regiones[Math.floor(Math.random() * regiones.length)]
+                });
+            }
+            
+            return { headers, rows };
+        }
+
+        async function handleFileUpload(file) {
+            // Validar tipo de archivo primero
+            const validExtensions = ['.csv', '.xlsx', '.xls', '.json'];
+            const fileExt = file.name.substring(file.name.lastIndexOf('.')).toLowerCase();
+            
+            if (!validExtensions.includes(fileExt)) {
+                addBotMessage('❌ Formato de archivo no soportado. Por favor sube un archivo CSV, Excel o JSON.');
+                showErrorState();
+                return;
+            }
+
+            // Mostrar información del archivo
+            document.getElementById('fileName').textContent = file.name;
+            document.getElementById('fileSize').textContent = formatFileSize(file.size);
+            document.getElementById('fileType').textContent = file.type || fileExt;
+            fileInfo.style.display = 'block';
+            
+            showLoading('Procesando archivo...');
+            
+            try {
+        const formData = new FormData();
+        formData.append('file', file);
+        
+        const response = await fetch('http://localhost:5000/upload', {
+            method: 'POST',
+            body: formData
+        });
+        
+        const result = await response.json();
+        
+        if (!response.ok) {
+            throw new Error(result.error || 'Error en el servidor');
+        }
+
+        if (result.success) {
+            // Obtener los datos reales del backend
+            const dataResponse = await fetch('http://localhost:5000/get_data');
+            const dataResult = await dataResponse.json();
+            
+            if (!dataResponse.ok) {
+                throw new Error(dataResult.error || 'Error al obtener datos');
+            }
+
+            // Procesar los datos para el frontend
+            processedData = {
+                headers: Object.keys(dataResult.data[0]),
+                rows: dataResult.data
+            };
+            
+            uploadedData = dataResult.data;
+            
+            // Mostrar estadísticas (código existente)
+            showDataSummary(processedData);
+            populateAxisSelectors(processedData.headers);
+            showChartControls();
+            
+            // Habilitar chatbot
+            chatInput.disabled = false;
+            sendBtn.disabled = false;
+            
+            addBotMessage('¡Archivo procesado exitosamente! 📊 Ahora puedes hacer preguntas sobre los datos o generar visualizaciones.');
+            
+            // Generar gráficos iniciales
+            generateInitialCharts(processedData);
+        }
+            } catch (error) {
+                console.error('Error processing file:', error);
+                addBotMessage(`❌ Error al procesar el archivo: ${error.message}`);
+                showErrorState();
+                
+                // Resetear estado
+                fileInfo.style.display = 'none';
+                document.getElementById('statsGrid').style.display = 'none';
+                document.getElementById('columnInfo').style.display = 'none';
+                chatInput.disabled = true;
+                sendBtn.disabled = true;
+            }
+        }
+
+        function formatFileSize(bytes) {
+            if (bytes === 0) return '0 Bytes';
+            const k = 1024;
+            const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+        }
+
+        function showDataSummary(data) {
+            const { headers, rows } = data;
+            
+            // Calculate statistics
+            const numericColumns = headers.filter(header => 
+                rows.length > 0 && typeof rows[0][header] === 'number'
+            );
+            
+            let nullCount = 0;
+            rows.forEach(row => {
+                headers.forEach(header => {
+                    if (row[header] === null || row[header] === undefined || row[header] === '') {
+                        nullCount++;
+                    }
+                });
+            });
+            
+            // Show statistics
+            document.getElementById('rowCount').textContent = rows.length.toLocaleString();
+            document.getElementById('colCount').textContent = headers.length;
+            document.getElementById('numericCols').textContent = numericColumns.length;
+            document.getElementById('nullValues').textContent = nullCount.toLocaleString();
+            document.getElementById('statsGrid').style.display = 'grid';
+            
+            // Show column information
+            const columnList = document.getElementById('columnList');
+            columnList.innerHTML = headers.map(header => {
+                const values = rows.map(row => row[header]);
+                const uniqueValues = [...new Set(values)].length;
+                const nullCount = values.filter(v => v === null || v === undefined || v === '').length;
+                const type = typeof values.find(v => v !== null && v !== undefined && v !== '') || 'string';
+                
+                return `
+                    <div style="margin-bottom: 0.5rem; padding: 0.5rem; background: #f8fafc; border-radius: 4px; border-left: 3px solid #667eea;">
+                        <strong>${header}</strong> (${type})
+                        <br>
+                        <small style="color: #718096;">
+                            ${uniqueValues} únicos, ${nullCount} nulos
+                        </small>
+                    </div>
+                `;
+            }).join('');
+            document.getElementById('columnInfo').style.display = 'block';
+        }
+
+        function populateAxisSelectors(headers) {
+            const xAxisSelect = document.getElementById('xAxis');
+            const yAxisSelect = document.getElementById('yAxis');
+            
+            // Clear existing options
+            xAxisSelect.innerHTML = '<option value="">Seleccionar eje X</option>';
+            yAxisSelect.innerHTML = '<option value="">Seleccionar eje Y</option>';
+            
+            // Add headers as options
+            headers.forEach(header => {
+                const xOption = new Option(header, header);
+                const yOption = new Option(header, header);
+                xAxisSelect.add(xOption);
+                yAxisSelect.add(yOption);
+            });
+        }
+
+        function showChartControls() {
+            document.getElementById('chartControls').style.display = 'flex';
+            document.getElementById('chartTabs').style.display = 'flex';
+        }
+
+        function generateInitialCharts(data) {
+            const { rows } = data;
+            
+            // Find numeric columns for initial charts
+            const numericColumns = Object.keys(rows[0]).filter(key => 
+                typeof rows[0][key] === 'number'
+            );
+            
+            if (numericColumns.length >= 2) {
+                // Generate scatter plot
+                currentCharts['chart1'] = createScatterPlot(rows, numericColumns[0], numericColumns[1]);
+                switchTab('chart1');
+            }
+            
+            if (numericColumns.length >= 1) {
+                // Generate histogram
+                setTimeout(() => {
+                    currentCharts['chart2'] = createHistogram(rows, numericColumns[0]);
+                }, 100);
+            }
+            
+            // Generate category distribution
+            const categoryColumns = Object.keys(rows[0]).filter(key => 
+                typeof rows[0][key] === 'string'
+            );
+            
+            if (categoryColumns.length >= 1) {
+                setTimeout(() => {
+                    currentCharts['chart3'] = createPieChart(rows, categoryColumns[0]);
+                }, 200);
+            }
+        }
+
+        function generateChart() {
+            const chartType = document.getElementById('chartType').value;
+            const xAxis = document.getElementById('xAxis').value;
+            const yAxis = document.getElementById('yAxis').value;
+            
+            if (!chartType) {
+                addBotMessage('❌ Por favor selecciona un tipo de gráfico.');
+                return;
+            }
+            
+            if (!xAxis && ['bar', 'line', 'scatter'].includes(chartType)) {
+                addBotMessage('❌ Por favor selecciona el eje X.');
+                return;
+            }
+            
+            const data = processedData.rows;
+            let chart;
+            
+            try {
+                switch (chartType) {
+                    case 'bar':
+                        if (!yAxis) {
+                            addBotMessage('❌ Por favor selecciona el eje Y para el gráfico de barras.');
+                            return;
+                        }
+                        chart = createBarChart(data, xAxis, yAxis);
+                        break;
+                    case 'line':
+                        if (!yAxis) {
+                            addBotMessage('❌ Por favor selecciona el eje Y para el gráfico de líneas.');
+                            return;
+                        }
+                        chart = createLineChart(data, xAxis, yAxis);
+                        break;
+                    case 'pie':
+                        chart = createPieChart(data, xAxis);
+                        break;
+                    case 'scatter':
+                        if (!yAxis) {
+                            addBotMessage('❌ Por favor selecciona el eje Y para el diagrama de dispersión.');
+                            return;
+                        }
+                        chart = createScatterPlot(data, xAxis, yAxis);
+                        break;
+                    case 'histogram':
+                        chart = createHistogram(data, xAxis);
+                        break;
+                    case 'heatmap':
+                        chart = createHeatmap(data);
+                        break;
+                    default:
+                        addBotMessage('❌ Tipo de gráfico no soportado.');
+                        return;
+                }
+                
+                currentCharts[activeTab] = chart;
+                addBotMessage(`✅ Gráfico de ${chartType} generado exitosamente en la pestaña ${activeTab.toUpperCase()}.`);
+                
+            } catch (error) {
+                console.error('Error generating chart:', error);
+                addBotMessage(`❌ Error al generar el gráfico: ${error.message}`);
+            }
+        }
+
+        function createBarChart(data, xColumn, yColumn) {
+            // Usar datos reales directamente (data ya es el array de filas)
+                const labels = data.map(row => row[xColumn]);
+                const values = data.map(row => row[yColumn]);
+                
+                const ctx = document.createElement('canvas');
+                const chartContainer = document.getElementById('chartContent');
+                chartContainer.innerHTML = '';
+                chartContainer.appendChild(ctx);
+                
+                return new Chart(ctx, {
+                    type: 'bar',
+                    data: {
+                        labels: labels,
+                        datasets: [{
+                            label: yColumn,
+                            data: values,
+                            backgroundColor: 'rgba(102, 126, 234, 0.8)',
+                            borderColor: 'rgba(102, 126, 234, 1)',
+                            borderWidth: 1
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            title: {
+                                display: true,
+                                text: `${yColumn} por ${xColumn}`
+                            }
+                        },
+                        scales: {
+                            y: {
+                                beginAtZero: true
+                            }
+                        }
+                    }
+                });
+            }
+
+        function createLineChart(data, xColumn, yColumn) {
+            // Sort data by x-axis for better line visualization
+            const sortedData = [...data].sort((a, b) => {
+                if (typeof a[xColumn] === 'number' && typeof b[xColumn] === 'number') {
+                    return a[xColumn] - b[xColumn];
+                }
+                return String(a[xColumn]).localeCompare(String(b[xColumn]));
+            });
+            
+            const labels = sortedData.map(row => row[xColumn]);
+            const values = sortedData.map(row => row[yColumn]);
+            
+            const ctx = document.createElement('canvas');
+            const chartContainer = document.getElementById('chartContent');
+            chartContainer.innerHTML = '';
+            chartContainer.appendChild(ctx);
+            
+            return new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: yColumn,
+                        data: values,
+                        borderColor: 'rgba(102, 126, 234, 1)',
+                        backgroundColor: 'rgba(102, 126, 234, 0.1)',
+                        tension: 0.4,
+                        fill: true
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: `${yColumn} vs ${xColumn}`
+                        }
+                    }
+                }
+            });
+        }
+
+        function createPieChart(data, column) {
+            // Count occurrences of each category
+            const counts = {};
+            data.forEach(row => {
+                const value = row[column];
+                counts[value] = (counts[value] || 0) + 1;
+            });
+            
+            const labels = Object.keys(counts);
+            const values = Object.values(counts);
+            
+            const colors = [
+                '#667eea', '#764ba2', '#f093fb', '#f5576c',
+                '#4facfe', '#43e97b', '#38f9d7', '#fee140',
+                '#fa709a', '#c471f5', '#12c2e9', '#c471ed'
+            ];
+            
+            const ctx = document.createElement('canvas');
+            const chartContainer = document.getElementById('chartContent');
+            chartContainer.innerHTML = '';
+            chartContainer.appendChild(ctx);
+            
+            return new Chart(ctx, {
+                type: 'pie',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        data: values,
+                        backgroundColor: colors.slice(0, labels.length),
+                        borderColor: colors.slice(0, labels.length),
+                        borderWidth: 2
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: `Distribución de ${column}`
+                        },
+                        legend: {
+                            position: 'right'
+                        }
+                    }
+                }
+            });
+        }
+
+        function createScatterPlot(data, xColumn, yColumn) {
+            const plotData = data.map(row => ({
+                x: row[xColumn],
+                y: row[yColumn]
+            })).filter(point => typeof point.x === 'number' && typeof point.y === 'number');
+            
+            const chartContainer = document.getElementById('chartContent');
+            chartContainer.innerHTML = '<div id="plotlyChart" style="width: 100%; height: 400px;"></div>';
+            
+            const trace = {
+                x: plotData.map(d => d.x),
+                y: plotData.map(d => d.y),
+                mode: 'markers',
+                type: 'scatter',
+                marker: {
+                    color: 'rgba(102, 126, 234, 0.8)',
+                    size: 8
+                },
+                name: 'Datos'
+            };
+            
+            const layout = {
+                title: `${yColumn} vs ${xColumn}`,
+                xaxis: { title: xColumn },
+                yaxis: { title: yColumn },
+                font: { family: 'Arial, sans-serif' },
+                showlegend: false,
+                margin: { t: 50, l: 50, r: 50, b: 50 }
+            };
+            
+            Plotly.newPlot('plotlyChart', [trace], layout, {responsive: true});
+            return { type: 'plotly', elementId: 'plotlyChart' };
+        }
+
+        function createHistogram(data, column) {
+            const values = data.map(row => row[column]).filter(v => typeof v === 'number');
+            
+            const chartContainer = document.getElementById('chartContent');
+            chartContainer.innerHTML = '<div id="plotlyChart" style="width: 100%; height: 400px;"></div>';
+            
+            const trace = {
+                x: values,
+                type: 'histogram',
+                marker: {
+                    color: 'rgba(102, 126, 234, 0.8)',
+                    line: {
+                        color: 'rgba(102, 126, 234, 1)',
+                        width: 1
+                    }
+                },
+                name: column
+            };
+            
+            const layout = {
+                title: `Distribución de ${column}`,
+                xaxis: { title: column },
+                yaxis: { title: 'Frecuencia' },
+                font: { family: 'Arial, sans-serif' },
+                showlegend: false,
+                margin: { t: 50, l: 50, r: 50, b: 50 }
+            };
+            
+            Plotly.newPlot('plotlyChart', [trace], layout, {responsive: true});
+            return { type: 'plotly', elementId: 'plotlyChart' };
+        }
+
+        function createHeatmap(data) {
+            // Get numeric columns only
+            const numericColumns = Object.keys(data[0]).filter(key => 
+                typeof data[0][key] === 'number'
+            );
+            
+            if (numericColumns.length < 2) {
+                throw new Error('Se necesitan al menos 2 columnas numéricas para crear un mapa de calor');
+            }
+            
+            // Calculate correlation matrix
+            const correlationMatrix = [];
+            const labels = [];
+            
+            numericColumns.forEach((col1, i) => {
+                correlationMatrix[i] = [];
+                labels[i] = col1;
+                
+                numericColumns.forEach((col2, j) => {
+                    const values1 = data.map(row => row[col1]).filter(v => !isNaN(v));
+                    const values2 = data.map(row => row[col2]).filter(v => !isNaN(v));
+                    
+                    // Calculate Pearson correlation coefficient
+                    const correlation = calculateCorrelation(values1, values2);
+                    correlationMatrix[i][j] = correlation;
+                });
+            });
+            
+            const chartContainer = document.getElementById('chartContent');
+            chartContainer.innerHTML = '<div id="plotlyChart" style="width: 100%; height: 400px;"></div>';
+            
+            const trace = {
+                z: correlationMatrix,
+                x: labels,
+                y: labels,
+                type: 'heatmap',
+                colorscale: [
+                    [0, 'rgb(49,54,149)'],
+                    [0.5, 'rgb(255,255,255)'],
+                    [1, 'rgb(165,0,38)']
+                ],
+                zmin: -1,
+                zmax: 1
+            };
+            
+            const layout = {
+                title: 'Matriz de Correlación',
+                xaxis: { title: 'Variables' },
+                yaxis: { title: 'Variables' },
+                font: { family: 'Arial, sans-serif' },
+                margin: { t: 50, l: 80, r: 50, b: 80 }
+            };
+            
+            Plotly.newPlot('plotlyChart', [trace], layout, {responsive: true});
+            return { type: 'plotly', elementId: 'plotlyChart' };
+        }
+
+        function calculateCorrelation(x, y) {
+            const n = Math.min(x.length, y.length);
+            const sumX = x.slice(0, n).reduce((a, b) => a + b, 0);
+            const sumY = y.slice(0, n).reduce((a, b) => a + b, 0);
+            const sumXY = x.slice(0, n).reduce((sum, xi, i) => sum + xi * y[i], 0);
+            const sumXX = x.slice(0, n).reduce((sum, xi) => sum + xi * xi, 0);
+            const sumYY = y.slice(0, n).reduce((sum, yi) => sum + yi * yi, 0);
+            
+            const numerator = n * sumXY - sumX * sumY;
+            const denominator = Math.sqrt((n * sumXX - sumX * sumX) * (n * sumYY - sumY * sumY));
+            
+            return denominator === 0 ? 0 : numerator / denominator;
+        }
+
+        function switchTab(tabName) {
+            // Update active tab
+            document.querySelectorAll('.chart-tab').forEach(tab => {
+                tab.classList.remove('active');
+            });
+            document.querySelector(`[data-tab="${tabName}"]`).classList.add('active');
+            
+            activeTab = tabName;
+            
+            // Show chart for this tab
+            if (currentCharts[tabName]) {
+                const chart = currentCharts[tabName];
+                if (chart.type === 'plotly') {
+                    const chartContainer = document.getElementById('chartContent');
+                    chartContainer.innerHTML = `<div id="${chart.elementId}" style="width: 100%; height: 400px;"></div>`;
+                    // Chart will be re-rendered when user generates it again
+                } else {
+                    // Chart.js chart
+                    const chartContainer = document.getElementById('chartContent');
+                    chartContainer.innerHTML = '';
+                    chartContainer.appendChild(chart.canvas);
+                }
+            } else {
+                showChartPlaceholder();
+            }
+        }
+
+        function showChartPlaceholder() {
+            const chartContainer = document.getElementById('chartContent');
+            chartContainer.innerHTML = `
+                <div class="chart-placeholder">
+                    <i class="fas fa-chart-area" style="font-size: 3rem; margin-bottom: 1rem;"></i>
+                    <p>Genera un gráfico usando los controles de arriba</p>
+                    <small style="margin-top: 0.5rem; opacity: 0.7;">
+                        Selecciona el tipo de gráfico y los ejes para crear una visualización
+                    </small>
+                </div>
+            `;
+        }
+
+        // Chat functionality
+        chatInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                sendMessage();
+            }
+        });
+
+        sendBtn.addEventListener('click', sendMessage);
+
+        
+
+        async function sendMessage() {
+            const message = chatInput.value.trim();
+            if (!message) return;
+
+            chatInput.disabled = true;
+            sendBtn.disabled = true;
+
+            addUserMessage(message);
+            chatInput.value = '';
+
+            addTypingIndicator();
+
+            try {
+                const response = await fetch("http://localhost:5000/chat", {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json"
+                    },
+                    body: JSON.stringify({ message })
+                });
+
+                const data = await response.json();
+                removeTypingIndicator();
+
+                if (data.success) {
+                    addBotMessage(data.response);
+                } else {
+                    addBotMessage("❌ Ocurrió un error: " + (data.error || "Respuesta no válida"));
+                }
+
+            } catch (error) {
+                removeTypingIndicator();
+                console.error('Error en la conexión:', error);
+                addBotMessage("❌ No se pudo conectar con el servidor.");
+            } finally {
+                chatInput.disabled = false;
+                sendBtn.disabled = false;
+                chatInput.focus();
+            }
+        }
+
+
+        function addTypingIndicator() {
+            const chatMessages = document.getElementById('chatMessages');
+            const typingDiv = document.createElement('div');
+            typingDiv.className = 'message bot typing-indicator';
+            typingDiv.id = 'typing-indicator';
+            typingDiv.innerHTML = `
+                <div class="loading">
+                    <div class="spinner"></div>
+                    Analizando...
+                </div>
+            `;
+            chatMessages.appendChild(typingDiv);
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+        }
+
+        function removeTypingIndicator() {
+            const typingIndicator = document.getElementById('typing-indicator');
+            if (typingIndicator) {
+                typingIndicator.remove();
+            }
+        }
+
+        function addUserMessage(message) {
+            const chatMessages = document.getElementById('chatMessages');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = 'message user';
+            messageDiv.textContent = message;
+            chatMessages.appendChild(messageDiv);
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+        }
+
+        function addBotMessage(message) {
+            const chatMessages = document.getElementById('chatMessages');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = 'message bot';
+            messageDiv.textContent = message;
+            chatMessages.appendChild(messageDiv);
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+        }
+
+        function showLoading(text) {
+            const chartContainer = document.getElementById('chartContent');
+            chartContainer.innerHTML = `
+                <div class="loading" style="height: 300px; display: flex; flex-direction: column; align-items: center; justify-content: center;">
+                    <div class="spinner"></div>
+                    <span style="margin-top: 1rem;">${text}</span>
+                </div>
+            `;
+        }
+
+        function showErrorState() {
+            const chartContainer = document.getElementById('chartContent');
+            chartContainer.innerHTML = `
+                <div class="chart-placeholder">
+                    <i class="fas fa-exclamation-triangle" style="font-size: 3rem; margin-bottom: 1rem; color: #e53e3e;"></i>
+                    <p>Error al procesar el archivo</p>
+                    <small style="margin-top: 0.5rem; opacity: 0.7;">
+                        Verifica que el archivo tenga el formato correcto
+                    </small>
+                </div>
+            `;
+        }
+
+        // Initialize chart placeholder
+        showChartPlaceholder();
+        // Exportar PDF
+        document.getElementById('exportPdfBtn').addEventListener('click', async () => {
+            if (!uploadedData) {
+                addBotMessage('❌ No hay datos cargados para exportar');
+                return;
+            }
+
+            showLoading('Generando informe PDF...');
+            
+            try {
+                const response = await fetch('http://localhost:5000/generate_pdf', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ data: uploadedData })
+                });
+
+                if (!response.ok) {
+                    throw new Error('Error al generar el PDF');
+                }
+
+                const blob = await response.blob();
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'analisis_datos.pdf';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                
+                addBotMessage('✅ Informe PDF generado y descargado exitosamente');
+            } catch (error) {
+                console.error('Error:', error);
+                addBotMessage(`❌ Error al generar el PDF: ${error.message}`);
+            }
+        });
+
+        // Análisis completo con IA
+        document.getElementById('analyzeDataBtn').addEventListener('click', async () => {
+            if (!uploadedData) {
+                addBotMessage('❌ No hay datos cargados para analizar');
+                return;
+            }
+
+            addTypingIndicator();
+            
+            try {
+                const response = await fetch('http://localhost:5000/full_analysis', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ data: uploadedData })
+                });
+
+                const result = await response.json();
+                removeTypingIndicator();
+
+                if (result.success) {
+                    addBotMessage(result.analysis);
+                } else {
+                    addBotMessage('❌ Error en el análisis: ' + (result.error || 'Error desconocido'));
+                }
+            } catch (error) {
+                removeTypingIndicator();
+                console.error('Error:', error);
+                addBotMessage('❌ Error de conexión con el servidor');
+            }
+            });
+        </script>
+</body>
+</html>
 
