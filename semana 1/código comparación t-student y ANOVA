@@ -1,0 +1,883 @@
+library(shiny)
+library(readxl)
+library(ggplot2)
+library(dplyr)
+library(gridExtra)
+library(shinydashboard)
+library(DT)
+
+# Cargar paquetes 
+if (!require("shinydashboard")) install.packages("shinydashboard")
+if (!require("DT")) install.packages("DT")
+
+ui <- dashboardPage(
+  skin = "blue",
+  
+  dashboardHeader(
+    title = "Análisis T-Student y ANOVA",
+    titleWidth = 300
+  ),
+  
+  dashboardSidebar(
+    width = 300,
+    sidebarMenu(
+      menuItem("Análisis Estadístico", tabName = "analisis", icon = icon("chart-bar")),
+      menuItem("Exploración de Datos", tabName = "datos", icon = icon("table"))
+    ),
+    
+    br(),
+    
+    # Panel 
+    box(
+      title = "Configuración del Análisis", 
+      status = "primary", 
+      solidHeader = TRUE,
+      width = 12,
+      
+      fileInput("archivo", 
+                label = div(icon("upload"), " Cargar Archivo"),
+                accept = c(".csv", ".xlsx"),
+                buttonLabel = "Examinar...",
+                placeholder = "Ningún archivo seleccionado"),
+      
+      checkboxInput("encabezado", "Archivo con encabezados", TRUE),
+      
+      hr(style = "border-color: #3c8dbc;"),
+      
+      uiOutput("var_depen"),
+      uiOutput("var_grupo"),
+      
+      hr(style = "border-color: #3c8dbc;"),
+      
+      selectInput("tipo_grafico", 
+                  label = div(icon("chart-line"), " Tipo de Visualización"),
+                  choices = c("Campana de Gauss" = "gauss",
+                              "Gráfico de Barras" = "barras",
+                              "Gráfico de Dispersión" = "scatter"),
+                  selected = "gauss"),
+      
+      sliderInput("alpha", 
+                  label = div(icon("percent"), " Nivel de Significancia (α)"),
+                  min = 0.01, max = 0.1, value = 0.05, step = 0.01),
+      
+      hr(style = "border-color: #3c8dbc;"),
+      
+      h5("Opciones Adicionales", style = "color: #3c8dbc; font-weight: bold;"),
+      checkboxGroupInput("extras", 
+                         label = NULL,
+                         choices = c("Tabla de resumen estadístico" = "resumen",
+                                     "Medias por grupo" = "medias",
+                                     "Prueba de normalidad" = "normalidad",
+                                     "Prueba de homogeneidad" = "varianza"),
+                         selected = c("resumen", "medias"))
+    )
+  ),
+  
+  dashboardBody(
+    # CSS personalizado para diseño empresarial
+    tags$head(
+      tags$style(HTML("
+        .content-wrapper, .right-side {
+          background-color: #f4f4f4;
+        }
+        
+        .main-header .logo {
+          background-color: #2c3e50 !important;
+          color: white !important;
+          border-bottom: 0 solid transparent;
+        }
+        
+        .main-header .navbar {
+          background-color: #2c3e50 !important;
+        }
+        
+        .sidebar {
+          background-color: #34495e !important;
+        }
+        
+        .sidebar-menu > li > a {
+          color: #ecf0f1 !important;
+        }
+        
+        .sidebar-menu > li.active > a {
+          background-color: #3c8dbc !important;
+        }
+        
+        .box.box-primary {
+          border-top-color: #3c8dbc;
+        }
+        .box.box-primary > .box-header > .box-title {
+         color: #000000 !important;
+        }
+        .box.box-success {
+          border-top-color: #00a65a;
+        }
+        
+        .box.box-info {
+          border-top-color: #00c0ef;
+        }
+        
+        .box.box-warning {
+          border-top-color: #f39c12;
+        }
+        
+        .value-box-icon {
+          padding-top: 15px;
+        }
+        
+        .small-box .icon {
+          top: 10px;
+          font-size: 70px;
+        }
+        
+        .nav-tabs-custom > .nav-tabs > li.active {
+          border-top-color: #3c8dbc;
+        }
+        
+        .btn-primary {
+          background-color: #3c8dbc;
+          border-color: #3c8dbc;
+        }
+        
+        .btn-primary:hover {
+          background-color: #337ab7;
+          border-color: #2e6da4;
+        }
+        
+        pre {
+          background-color: #f8f9fa;
+          border: 1px solid #e9ecef;
+          border-radius: 4px;
+          padding: 15px;
+          font-family: 'Courier New', monospace;
+          font-size: 13px;
+        }
+        
+        .resultado-box {
+          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+          color: white;
+          padding: 20px;
+          border-radius: 8px;
+          margin-bottom: 20px;
+        }
+        
+        .stat-highlight {
+          background-color: #e8f4fd;
+          padding: 10px;
+          border-left: 4px solid #3c8dbc;
+          margin: 10px 0;
+        }
+                  /* Cambiar color de texto de labels y checkboxes */
+          .checkbox label {
+            color: #000000 !important;
+          }
+          
+          .control-label {
+            color: #000000 !important;
+          }
+          
+          /* Cambiar color de texto en inputs y selects */
+          .form-control {
+            color: #000000 !important;
+          }
+          
+          /* Cambiar color de texto en sliders */
+          .irs-grid-text {
+            color: #000000 !important;
+          }
+      "))
+    ),
+    
+    tabItems(
+      tabItem(tabName = "analisis",
+              fluidRow(
+                # Métricas principales
+                valueBoxOutput("p_valor_box", width = 3),
+                valueBoxOutput("estadistico_box", width = 3),
+                valueBoxOutput("alpha_box", width = 3),
+                valueBoxOutput("conclusion_box", width = 3)
+              ),
+              
+              fluidRow(
+                # Resultados del análisis
+                box(
+                  title = "Resultados del Análisis Estadístico", 
+                  status = "primary", 
+                  solidHeader = TRUE,
+                  width = 12,
+                  collapsible = TRUE,
+                  
+                  div(class = "resultado-box",
+                      verbatimTextOutput("resultado")
+                  )
+                )
+              ),
+              
+              fluidRow(
+                # Gráfico principal
+                box(
+                  title = "Visualización", 
+                  status = "info", 
+                  solidHeader = TRUE,
+                  width = 8,
+                  collapsible = TRUE,
+                  
+                  plotOutput("grafico", height = "500px")
+                ),
+                
+                # Panel de información adicional
+                box(
+                  title = "Información del Análisis", 
+                  status = "success", 
+                  solidHeader = TRUE,
+                  width = 4,
+                  collapsible = TRUE,
+                  
+                  div(class = "stat-highlight",
+                      h4("Tipo de Prueba"),
+                      textOutput("tipo_prueba")
+                  ),
+                  
+                  div(class = "stat-highlight",
+                      h4("Variables Analizadas"),
+                      textOutput("variables_info")
+                  ),
+                  
+                  div(class = "stat-highlight",
+                      h4("Tamaño de Muestra"),
+                      textOutput("muestra_info")
+                  )
+                )
+              ),
+              
+              fluidRow(
+                # Pruebas de supuestos
+                conditionalPanel(
+                  condition = "input.extras.indexOf('normalidad') > -1",
+                  box(
+                    title = "Prueba de Normalidad", 
+                    status = "warning", 
+                    solidHeader = TRUE,
+                    width = 6,
+                    collapsible = TRUE,
+                    collapsed = TRUE,
+                    
+                    verbatimTextOutput("prueba_normalidad")
+                  )
+                ),
+                
+                conditionalPanel(
+                  condition = "input.extras.indexOf('varianza') > -1",
+                  box(
+                    title = "Prueba de Homogeneidad de Varianzas", 
+                    status = "warning", 
+                    solidHeader = TRUE,
+                    width = 6,
+                    collapsible = TRUE,
+                    collapsed = TRUE,
+                    
+                    verbatimTextOutput("prueba_varianza")
+                  )
+                )
+              )
+      ),
+      
+      tabItem(tabName = "datos",
+              fluidRow(
+                conditionalPanel(
+                  condition = "input.extras.indexOf('resumen') > -1",
+                  box(
+                    title = "Resumen Estadístico General", 
+                    status = "success", 
+                    solidHeader = TRUE,
+                    width = 6,
+                    
+                    tableOutput("tabla_resumen")
+                  )
+                ),
+                
+                conditionalPanel(
+                  condition = "input.extras.indexOf('medias') > -1",
+                  box(
+                    title = "Estadísticas por Grupo", 
+                    status = "info", 
+                    solidHeader = TRUE,
+                    width = 6,
+                    
+                    tableOutput("tabla_medias")
+                  )
+                )
+              ),
+              
+              fluidRow(
+                box(
+                  title = "Datos Originales", 
+                  status = "primary", 
+                  solidHeader = TRUE,
+                  width = 12,
+                  collapsible = TRUE,
+                  
+                  DT::dataTableOutput("datos_crudos")
+                )
+              )
+      )
+    )
+  )
+)
+
+server <- function(input, output, session) {
+  
+  datos <- reactive({
+    req(input$archivo)
+    ext <- tools::file_ext(input$archivo$name)
+    
+    tryCatch({
+      if (ext == "csv") {
+        df <- read.csv(input$archivo$datapath, header = input$encabezado, stringsAsFactors = FALSE)
+      } else if (ext == "xlsx") {
+        df <- read_excel(input$archivo$datapath, col_names = input$encabezado)
+      } else {
+        showNotification("Formato no soportado. Use CSV o XLSX.", type = "error")
+        return(NULL)
+      }
+      
+      validate(need(nrow(df) > 0, "El archivo está vacío."))
+      
+      # Convertir automáticamente columnas con pocos valores únicos a factores
+      for (col in names(df)) {
+        if (!is.numeric(df[[col]]) || length(unique(df[[col]])) <= 10) {
+          df[[col]] <- as.factor(df[[col]])
+        }
+      }
+      df
+    }, error = function(e) {
+      showNotification(paste("Error al cargar el archivo:", e$message), type = "error")
+      return(NULL)
+    })
+  })
+  
+  # Identificar columnas numéricas y categóricas
+  columnas_numericas <- reactive({
+    req(datos())
+    sapply(datos(), is.numeric)
+  })
+  
+  columnas_categoricas <- reactive({
+    req(datos())
+    sapply(datos(), function(x) is.factor(x) || is.character(x) || is.logical(x))
+  })
+  
+  output$var_depen <- renderUI({
+    req(datos())
+    num_cols <- names(datos())[columnas_numericas()]
+    selectInput("var_dep", 
+                label = div(icon("calculator"), " Variable Dependiente (Numérica)"),
+                choices = num_cols)
+  })
+  
+  output$var_grupo <- renderUI({
+    req(datos())
+    cat_cols <- names(datos())[columnas_categoricas()]
+    selectInput("var_grup", 
+                label = div(icon("layer-group"), " Variables Independientes (Categóricas)"),
+                choices = cat_cols, multiple = TRUE)
+  })
+  
+  # Análisis principal
+  resultado_analisis <- reactive({
+    req(datos(), input$var_dep, input$var_grup)
+    
+    df <- datos()
+    y <- df[[input$var_dep]]
+    grupo_vars <- input$var_grup
+    
+    validate(
+      need(is.numeric(y), "La variable dependiente debe ser numérica."),
+      need(length(grupo_vars) >= 1, "Seleccione al menos una variable independiente.")
+    )
+    
+    for (var in grupo_vars) {
+      df[[var]] <- as.factor(df[[var]])
+    }
+    
+    formula_txt <- paste(input$var_dep, "~", paste(grupo_vars, collapse = " + "))
+    formula <- as.formula(formula_txt)
+    
+    resultado <- list()
+    resultado$alpha <- input$alpha
+    
+    if (length(grupo_vars) == 1 && length(unique(df[[grupo_vars[1]]])) == 2) {
+      # Prueba t
+      resultado$tipo <- "t-test"
+      resultado$test <- t.test(formula, data = df)
+      resultado$p_valor <- resultado$test$p.value
+      resultado$interpretacion <- if (resultado$p_valor < resultado$alpha) {
+        "Se rechaza la hipótesis nula: hay diferencia significativa entre los grupos."
+      } else {
+        "No se rechaza la hipótesis nula: no hay diferencia significativa."
+      }
+      
+      resultado$grados_libertad <- resultado$test$parameter
+      resultado$estadistico <- resultado$test$statistic
+      resultado$valor_critico <- qt(1 - resultado$alpha/2, df = resultado$grados_libertad)
+      
+    } else {
+      # ANOVA
+      resultado$tipo <- "anova"
+      resultado$modelo <- aov(formula, data = df)
+      resultado$test <- summary(resultado$modelo)
+      resultado$p_valor <- summary(resultado$modelo)[[1]][["Pr(>F)"]][1]
+      resultado$interpretacion <- if (!is.na(resultado$p_valor) && resultado$p_valor < resultado$alpha) {
+        "Se rechaza la hipótesis nula: al menos un grupo difiere significativamente."
+      } else {
+        "No se rechaza la hipótesis nula: no hay diferencias significativas entre grupos."
+      }
+      
+      resultado$grado_libertad_1 <- resultado$test[[1]]["Df"][1,1]
+      resultado$grado_libertad_2 <- resultado$test[[1]]["Df"][2,1]
+      resultado$estadistico <- resultado$test[[1]]["F value"][1,1]
+      resultado$valor_critico <- qf(1 - resultado$alpha, 
+                                    df1 = resultado$grado_libertad_1, 
+                                    df2 = resultado$grado_libertad_2)
+      
+      # Post-hoc si es significativo
+      if (!is.na(resultado$p_valor) && resultado$p_valor < resultado$alpha) {
+        resultado$posthoc <- TukeyHSD(resultado$modelo, conf.level = 1 - resultado$alpha)
+      }
+    }
+    
+    resultado$datos <- df
+    resultado$formula <- formula
+    resultado$var_dep <- input$var_dep
+    resultado$var_grup <- grupo_vars
+    
+    return(resultado)
+  })
+  
+  # Value Boxes
+  output$p_valor_box <- renderValueBox({
+    req(resultado_analisis())
+    res <- resultado_analisis()
+    
+    valueBox(
+      value = if(is.na(res$p_valor)) "N/A" else round(res$p_valor, 4),
+      subtitle = "Valor p",
+      icon = icon("calculator"),
+      color = if(is.na(res$p_valor)) "yellow" else if(res$p_valor < res$alpha) "red" else "green"
+    )
+  })
+  
+  output$estadistico_box <- renderValueBox({
+    req(resultado_analisis())
+    res <- resultado_analisis()
+    
+    valueBox(
+      value = round(res$estadistico, 3),
+      subtitle = if(res$tipo == "t-test") "Estadístico t" else "Estadístico F",
+      icon = icon("chart-line"),
+      color = "blue"
+    )
+  })
+  
+  output$alpha_box <- renderValueBox({
+    req(resultado_analisis())
+    res <- resultado_analisis()
+    
+    valueBox(
+      value = res$alpha,
+      subtitle = "Nivel α",
+      icon = icon("percent"),
+      color = "purple"
+    )
+  })
+  
+  output$conclusion_box <- renderValueBox({
+    req(resultado_analisis())
+    res <- resultado_analisis()
+    
+    es_significativo <- !is.na(res$p_valor) && res$p_valor < res$alpha
+    
+    valueBox(
+      value = if(es_significativo) "SIGNIFICATIVO" else "NO SIGNIFICATIVO",
+      subtitle = "Conclusión",
+      icon = if(es_significativo) icon("times-circle") else icon("check-circle"),
+      color = if(es_significativo) "red" else "green"
+    )
+  })
+  
+  # Información adicional
+  output$tipo_prueba <- renderText({
+    req(resultado_analisis())
+    res <- resultado_analisis()
+    if(res$tipo == "t-test") {
+      "Prueba t de Student para muestras independientes"
+    } else {
+      "Análisis de Varianza (ANOVA)"
+    }
+  })
+  
+  output$variables_info <- renderText({
+    req(resultado_analisis())
+    res <- resultado_analisis()
+    paste("Dependiente:", res$var_dep, "\nIndependiente(s):", paste(res$var_grup, collapse = ", "))
+  })
+  
+  output$muestra_info <- renderText({
+    req(resultado_analisis())
+    res <- resultado_analisis()
+    paste("Total de observaciones:", nrow(res$datos))
+  })
+  
+  # Resultado principal
+  output$resultado <- renderPrint({
+    req(resultado_analisis())
+    
+    res <- resultado_analisis()
+    
+    if (res$tipo == "t-test") {
+      print(res$test)
+      cat("\n" %+% strrep("=", 50) %+% "\n")
+      cat("VALORES CRÍTICOS (α =", res$alpha, "):\n")
+      cat("t crítico: ±", round(res$valor_critico, 4), "\n")
+      cat("t calculado:", round(res$estadistico, 4), "\n")
+      
+    } else {
+      print(res$test)
+      cat("\n" %+% strrep("=", 50) %+% "\n")
+      cat("VALORES CRÍTICOS (α =", res$alpha, "):\n")
+      cat("F crítico:", round(res$valor_critico, 4), "\n")
+      cat("F calculado:", round(res$estadistico, 4), "\n")
+      
+      if (!is.na(res$p_valor) && res$p_valor < res$alpha) {
+        cat("\n" %+% strrep("-", 30) %+% "\n")
+        cat("ANÁLISIS POST-HOC (Tukey HSD):\n")
+        print(res$posthoc)
+      }
+    }
+    
+    cat("\n" %+% strrep("=", 50) %+% "\n")
+    cat("INTERPRETACIÓN:\n")
+    cat(res$interpretacion)
+  })
+  
+  # Función para crear campana de Gauss
+  crear_campana_gauss <- function(res) {
+    if (res$tipo == "t-test") {
+      df <- res$grados_libertad
+      t_stat <- res$estadistico
+      alpha <- res$alpha
+      t_critical <- qt(1 - alpha/2, df)
+      x <- seq(-4, 4, length.out = 1000)
+      y <- dt(x, df)
+      
+      reject_region1 <- data.frame(
+        x = seq(-4, -t_critical, length.out = 100),
+        y = dt(seq(-4, -t_critical, length.out = 100), df)
+      )
+      
+      reject_region2 <- data.frame(
+        x = seq(t_critical, 4, length.out = 100),
+        y = dt(seq(t_critical, 4, length.out = 100), df)
+      )
+      
+      p <- ggplot() +
+        geom_line(data = data.frame(x = x, y = y), aes(x = x, y = y), linewidth = 1.2, color = "#2c3e50") +
+        geom_area(data = reject_region1, aes(x = x, y = y), fill = "#e74c3c", alpha = 0.7) +
+        geom_area(data = reject_region2, aes(x = x, y = y), fill = "#e74c3c", alpha = 0.7) +
+        geom_vline(xintercept = -t_critical, linetype = "dashed", color = "#c0392b", size = 1) +
+        geom_vline(xintercept = t_critical, linetype = "dashed", color = "#c0392b", size = 1) +
+        geom_vline(xintercept = as.numeric(t_stat), linetype = "solid", color = "#3498db", size = 1.5) +
+        
+        annotate("text", x = -t_critical - 0.5, y = max(y) * 0.8, 
+                 label = paste("t crítico =", round(-t_critical, 3)), 
+                 color = "#c0392b", fontface = "bold") +
+        annotate("text", x = t_critical + 0.5, y = max(y) * 0.8, 
+                 label = paste("t crítico =", round(t_critical, 3)), 
+                 color = "#c0392b", fontface = "bold") +
+        annotate("text", x = as.numeric(t_stat), y = max(y) * 0.5, 
+                 label = paste("t calculado =", round(as.numeric(t_stat), 3)), 
+                 color = "#3498db", fontface = "bold") +
+        
+        labs(title = paste("Distribución t de Student (gl =", round(df, 2), ")"),
+             subtitle = paste("Nivel de significancia α =", alpha, "| Valor p =", round(res$p_valor, 4)),
+             x = "Valor t", y = "Densidad") +
+        
+        theme_minimal() +
+        theme(
+          plot.title = element_text(hjust = 0.5, face = "bold", size = 14, color = "#2c3e50"),
+          plot.subtitle = element_text(hjust = 0.5, size = 12, color = "#7f8c8d"),
+          axis.title = element_text(face = "bold", color = "#2c3e50"),
+          panel.grid.major = element_line(color = "#ecf0f1"),
+          panel.grid.minor = element_line(color = "#ecf0f1")
+        )
+      
+      # Añadir conclusión
+      if (abs(as.numeric(t_stat)) > t_critical) {
+        p <- p + annotate("text", x = 0, y = max(y) * 0.1, 
+                          label = "❌ Se rechaza la hipótesis nula", 
+                          color = "#e74c3c", size = 5, fontface = "bold")
+      } else {
+        p <- p + annotate("text", x = 0, y = max(y) * 0.1, 
+                          label = "✅ No se rechaza la hipótesis nula", 
+                          color = "#27ae60", size = 5, fontface = "bold")
+      }
+      
+      return(p)
+      
+    } else if (res$tipo == "anova") {
+      # Distribución F
+      df1 <- res$grado_libertad_1
+      df2 <- res$grado_libertad_2
+      f_stat <- res$estadistico
+      alpha <- res$alpha
+      
+      f_critical <- qf(1 - alpha, df1, df2)
+      x <- seq(0, max(f_critical * 2, f_stat * 1.5), length.out = 1000)
+      y <- df(x, df1, df2)
+      
+      reject_region <- data.frame(
+        x = seq(f_critical, max(x), length.out = 100),
+        y = df(seq(f_critical, max(x), length.out = 100), df1, df2)
+      )
+      
+      p <- ggplot() +
+        geom_line(data = data.frame(x = x, y = y), aes(x = x, y = y), linewidth = 1.2, color = "#2c3e50") +
+        geom_area(data = reject_region, aes(x = x, y = y), fill = "#e74c3c", alpha = 0.7) +
+        geom_vline(xintercept = f_critical, linetype = "dashed", color = "#c0392b", size = 1) +
+        geom_vline(xintercept = f_stat, linetype = "solid", color = "#3498db", size = 1.5) +
+        
+        annotate("text", x = f_critical + (max(x) - f_critical) * 0.3, y = max(y) * 0.8, 
+                 label = paste("F crítico =", round(f_critical, 3)), 
+                 color = "#c0392b", fontface = "bold") +
+        annotate("text", x = f_stat, y = max(y) * 0.5, 
+                 label = paste("F calculado =", round(f_stat, 3)), 
+                 color = "#3498db", fontface = "bold") +
+        
+        labs(title = paste("Distribución F (gl1 =", df1, ", gl2 =", df2, ")"),
+             subtitle = paste("Nivel de significancia α =", alpha, "| Valor p =", round(res$p_valor, 4)),
+             x = "Valor F", y = "Densidad") +
+        
+        theme_minimal() +
+        theme(
+          plot.title = element_text(hjust = 0.5, face = "bold", size = 14, color = "#2c3e50"),
+          plot.subtitle = element_text(hjust = 0.5, size = 12, color = "#7f8c8d"),
+          axis.title = element_text(face = "bold", color = "#2c3e50"),
+          panel.grid.major = element_line(color = "#ecf0f1"),
+          panel.grid.minor = element_line(color = "#ecf0f1")
+        )
+      
+      # Añadir conclusión
+      if (f_stat > f_critical) {
+        p <- p + annotate("text", x = f_critical * 0.5, y = max(y) * 0.1, 
+                          label = "❌ Se rechaza la hipótesis nula", 
+                          color = "#e74c3c", size = 5, fontface = "bold")
+      } else {
+        p <- p + annotate("text", x = f_critical * 0.5, y = max(y) * 0.1, 
+                          label = "✅ No se rechaza la hipótesis nula", 
+                          color = "#27ae60", size = 5, fontface = "bold")
+      }
+      
+      return(p)
+    }
+  }
+  
+  # Función para crear gráfico de barras
+  crear_barras <- function(df, var_dep, var_grup) {
+    resumen <- df %>%
+      group_by(across(all_of(var_grup))) %>%
+      summarise(
+        Media = mean(.data[[var_dep]], na.rm = TRUE),
+        EE = sd(.data[[var_dep]], na.rm = TRUE) / sqrt(n()),
+        .groups = "drop"
+      )
+    
+    if (length(var_grup) == 1) {
+      ggplot(resumen, aes_string(x = var_grup[1], y = "Media", fill = var_grup[1])) +
+        geom_bar(stat = "identity", position = position_dodge(), alpha = 0.8) +
+        geom_errorbar(aes(ymin = Media - EE, ymax = Media + EE), 
+                      width = 0.2, position = position_dodge(0.9)) +
+        scale_fill_brewer(type = "qual", palette = "Set2") +
+        theme_minimal() +
+        labs(title = paste("Media de", var_dep, "por", var_grup[1]), 
+             y = paste("Media de", var_dep), x = var_grup[1]) +
+        theme(legend.position = "none",
+              plot.title = element_text(hjust = 0.5, face = "bold", color = "#2c3e50"),
+              axis.title = element_text(face = "bold", color = "#2c3e50"))
+    } else {
+      ggplot(resumen, aes_string(x = var_grup[1], y = "Media", fill = var_grup[2])) +
+        geom_bar(stat = "identity", position = position_dodge(), alpha = 0.8) +
+        geom_errorbar(aes(ymin = Media - EE, ymax = Media + EE), 
+                      width = 0.2, position = position_dodge(0.9)) +
+        scale_fill_brewer(type = "qual", palette = "Set2") +
+        theme_minimal() +
+        labs(title = paste("Media de", var_dep), y = paste("Media de", var_dep)) +
+        theme(plot.title = element_text(hjust = 0.5, face = "bold", color = "#2c3e50"),
+              axis.title = element_text(face = "bold", color = "#2c3e50"))
+    }
+  }
+  
+  # Función para crear gráfico de dispersión
+  crear_scatter <- function(df, var_dep, var_grup) {
+    df$index <- 1:nrow(df)
+    
+    if (length(var_grup) == 1) {
+      ggplot(df, aes_string(x = "index", y = var_dep, color = var_grup[1])) +
+        geom_point(alpha = 0.7, size = 2) +
+        scale_color_brewer(type = "qual", palette = "Set1") +
+        theme_minimal() +
+        labs(title = paste("Dispersión de", var_dep, "por", var_grup[1]), 
+             x = "Índice de Observación", y = var_dep) +
+        theme(plot.title = element_text(hjust = 0.5, face = "bold", color = "#2c3e50"),
+              axis.title = element_text(face = "bold", color = "#2c3e50"))
+    } else {
+      ggplot(df, aes_string(x = "index", y = var_dep, color = var_grup[1], shape = var_grup[2])) +
+        geom_point(alpha = 0.7, size = 2) +
+        scale_color_brewer(type = "qual", palette = "Set1") +
+        scale_shape_manual(values = 1:length(unique(df[[var_grup[2]]]))) +
+        theme_minimal() +
+        labs(title = paste("Dispersión de", var_dep, "por grupos"), 
+             x = "Índice de Observación", y = var_dep) +
+        theme(plot.title = element_text(hjust = 0.5, face = "bold", color = "#2c3e50"),
+              axis.title = element_text(face = "bold", color = "#2c3e50"))
+    }
+  }
+  
+  # Gráfico principal
+  output$grafico <- renderPlot({
+    req(resultado_analisis())
+    res <- resultado_analisis()
+    
+    if (input$tipo_grafico == "gauss") {
+      crear_campana_gauss(res)
+    } else if (input$tipo_grafico == "barras") {
+      crear_barras(res$datos, res$var_dep, res$var_grup)
+    } else if (input$tipo_grafico == "scatter") {
+      crear_scatter(res$datos, res$var_dep, res$var_grup)
+    }
+  })
+  
+  # Tablas de resumen
+  output$tabla_resumen <- renderTable({
+    req(datos(), input$var_dep)
+    df <- datos()
+    
+    resumen <- df %>%
+      select(where(is.numeric)) %>%
+      summarise_all(list(
+        Media = ~mean(., na.rm = TRUE),
+        Mediana = ~median(., na.rm = TRUE),
+        SD = ~sd(., na.rm = TRUE),
+        Min = ~min(., na.rm = TRUE),
+        Max = ~max(., na.rm = TRUE)
+      )) %>%
+      pivot_longer(everything(), names_to = "Variable_Estadistico", values_to = "Valor") %>%
+      separate(Variable_Estadistico, into = c("Variable", "Estadistico"), sep = "_") %>%
+      pivot_wider(names_from = Estadistico, values_from = Valor)
+    
+    resumen
+  }, digits = 3)
+  
+  output$tabla_medias <- renderTable({
+    req(resultado_analisis())
+    res <- resultado_analisis()
+    
+    if (length(res$var_grup) == 1) {
+      res$datos %>%
+        group_by(.data[[res$var_grup[1]]]) %>%
+        summarise(
+          N = n(),
+          Media = mean(.data[[res$var_dep]], na.rm = TRUE),
+          SD = sd(.data[[res$var_dep]], na.rm = TRUE),
+          SE = sd(.data[[res$var_dep]], na.rm = TRUE) / sqrt(n()),
+          .groups = "drop"
+        )
+    } else {
+      res$datos %>%
+        group_by(across(all_of(res$var_grup))) %>%
+        summarise(
+          N = n(),
+          Media = mean(.data[[res$var_dep]], na.rm = TRUE),
+          SD = sd(.data[[res$var_dep]], na.rm = TRUE),
+          SE = sd(.data[[res$var_dep]], na.rm = TRUE) / sqrt(n()),
+          .groups = "drop"
+        )
+    }
+  }, digits = 3)
+  
+  # Pruebas de supuestos
+  output$prueba_normalidad <- renderPrint({
+    req(resultado_analisis())
+    res <- resultado_analisis()
+    
+    cat("PRUEBA DE NORMALIDAD (Shapiro-Wilk)\n")
+    cat(strrep("=", 40), "\n\n")
+    
+    if (res$tipo == "t-test") {
+      grupos <- split(res$datos[[res$var_dep]], res$datos[[res$var_grup[1]]])
+      for (i in seq_along(grupos)) {
+        cat("Grupo:", names(grupos)[i], "\n")
+        if (length(grupos[[i]]) >= 3 && length(grupos[[i]]) <= 5000) {
+          test_result <- shapiro.test(grupos[[i]])
+          print(test_result)
+        } else {
+          cat("Tamaño de muestra no adecuado para Shapiro-Wilk\n")
+        }
+        cat("\n")
+      }
+    } else {
+      residuos <- residuals(res$modelo)
+      if (length(residuos) >= 3 && length(residuos) <= 5000) {
+        cat("Residuos del modelo ANOVA:\n")
+        test_result <- shapiro.test(residuos)
+        print(test_result)
+      } else {
+        cat("Tamaño de muestra no adecuado para Shapiro-Wilk\n")
+      }
+    }
+  })
+  
+  output$prueba_varianza <- renderPrint({
+    req(resultado_analisis())
+    res <- resultado_analisis()
+    
+    cat("PRUEBA DE HOMOGENEIDAD DE VARIANZAS\n")
+    cat(strrep("=", 40), "\n\n")
+    
+    tryCatch({
+      if (res$tipo == "t-test") {
+        # Prueba F para dos grupos
+        grupos <- split(res$datos[[res$var_dep]], res$datos[[res$var_grup[1]]])
+        if (length(grupos) == 2) {
+          test_result <- var.test(grupos[[1]], grupos[[2]])
+          print(test_result)
+        }
+      } else {
+        # Prueba de Bartlett para múltiples grupos
+        formula_bartlett <- as.formula(paste(res$var_dep, "~", paste(res$var_grup, collapse = " + ")))
+        test_result <- bartlett.test(formula_bartlett, data = res$datos)
+        print(test_result)
+      }
+    }, error = function(e) {
+      cat("Error en la prueba de homogeneidad:", e$message, "\n")
+    })
+  })
+  
+  # Datos crudos
+  output$datos_crudos <- DT::renderDataTable({
+    req(datos())
+    DT::datatable(datos(), 
+                  options = list(
+                    pageLength = 15,
+                    scrollX = TRUE,
+                    dom = 'Bfrtip',
+                    buttons = c('copy', 'csv', 'excel', 'pdf', 'print')
+                  ),
+                  extensions = 'Buttons')
+  })
+}
+
+# Función auxiliar para concatenación
+`%+%` <- function(a, b) paste0(a, b)
+
+# Ejecutar la aplicación
+shinyApp(ui = ui, server = server)
