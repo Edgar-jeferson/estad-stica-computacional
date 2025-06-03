@@ -1,1 +1,116 @@
 
+import pandas as pd
+import numpy as np
+from lazypredict.Supervised import LazyRegressor
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import mean_absolute_error, mean_squared_error
+import warnings
+warnings.filterwarnings('ignore')
+
+# Datos de ejemplo de ventas de rosas (enero a abril)
+# Puedes reemplazar estos datos con tus datos reales
+data = {
+    'mes': [1, 2, 3, 4],  # Enero=1, Febrero=2, etc.
+    'temperatura_promedio': [18, 20, 22, 24],  # Celsius
+    'dias_lluvia': [8, 6, 4, 2],
+    'precio_competencia': [15, 16, 14, 17],  # Precio por docena
+    'campanas_marketing': [2, 1, 3, 2],  # Número de campañas
+    'ventas_rosas': [450, 520, 680, 750]  # Variable objetivo
+}
+
+df = pd.DataFrame(data)
+print("Datos históricos de ventas de rosas:")
+print(df)
+print("\n" + "="*50 + "\n")
+
+# Preparar características (X) y variable objetivo (y)
+X = df[['mes', 'temperatura_promedio', 'dias_lluvia', 'precio_competencia', 'campanas_marketing']]
+y = df['ventas_rosas']
+
+# Como tenemos pocos datos, usaremos todos para entrenar
+# y crearemos datos sintéticos adicionales para mejor entrenamiento
+np.random.seed(42)
+
+# Generar datos sintéticos adicionales basados en los patrones existentes
+synthetic_data = []
+for i in range(20):  # Crear 20 puntos adicionales
+    mes_syn = np.random.choice([1, 2, 3, 4])
+    temp_syn = np.random.normal(20, 3)  # Temperatura con variación
+    lluvia_syn = np.random.poisson(5)   # Días de lluvia
+    precio_syn = np.random.uniform(13, 18)  # Precio competencia
+    campañas_syn = np.random.choice([1, 2, 3])  # Campañas
+    
+    # Ventas basadas en una función simple de los factores
+    ventas_syn = (mes_syn * 50 + temp_syn * 15 - lluvia_syn * 10 
+                  - precio_syn * 5 + campañas_syn * 30 + np.random.normal(0, 50))
+    ventas_syn = max(200, ventas_syn)  # Mínimo 200 ventas
+    
+    synthetic_data.append([mes_syn, temp_syn, lluvia_syn, precio_syn, campañas_syn, ventas_syn])
+
+# Combinar datos reales con sintéticos
+synthetic_df = pd.DataFrame(synthetic_data, 
+                           columns=['mes', 'temperatura_promedio', 'dias_lluvia', 
+                                   'precio_competencia', 'campanas_marketing', 'ventas_rosas'])
+combined_df = pd.concat([df, synthetic_df], ignore_index=True)
+
+# Preparar datos para entrenamiento
+X_combined = combined_df[['mes', 'temperatura_promedio', 'dias_lluvia', 'precio_competencia', 'campanas_marketing']]
+y_combined = combined_df['ventas_rosas']
+
+# Dividir datos para entrenamiento y prueba
+X_train, X_test, y_train, y_test = train_test_split(X_combined, y_combined, 
+                                                    test_size=0.3, random_state=42)
+
+print("Entrenando múltiples modelos con LazyPredict...")
+print("Esto puede tomar unos momentos...\n")
+
+# Usar LazyPredict para probar múltiples modelos
+lazy_regressor = LazyRegressor(verbose=0, ignore_warnings=True, custom_metric=None)
+models, predictions = lazy_regressor.fit(X_train, X_test, y_train, y_test)
+
+print("Resultados de los mejores modelos:")
+print(models.head(10))
+print("\n" + "="*50 + "\n")
+
+# Predicción para mayo (mes 5)
+# Asumimos condiciones para mayo
+mayo_data = pd.DataFrame({
+    'mes': [5],
+    'temperatura_promedio': [26],  # Mayo más cálido
+    'dias_lluvia': [3],           # Pocos días de lluvia
+    'precio_competencia': [16],    # Precio promedio
+    'campanas_marketing': [3]      # Campaña fuerte para día de la madre
+})
+
+print("Condiciones estimadas para Mayo:")
+print(mayo_data)
+print("\n")
+
+# Obtener el mejor modelo
+mejor_modelo_nombre = models.index[0]
+print(f"Mejor modelo: {mejor_modelo_nombre}")
+print(f"R² Score: {models.iloc[0]['R-Squared']:.4f}")
+print(f"RMSE: {models.iloc[0]['RMSE']:.2f}")
+
+# Para la predicción, usaremos el modelo de regresión lineal simple
+# ya que LazyPredict no guarda los modelos entrenados por defecto
+from sklearn.linear_model import LinearRegression
+
+# Entrenar modelo simple para predicción
+modelo_simple = LinearRegression()
+modelo_simple.fit(X_combined, y_combined)
+
+# Predicción para mayo
+prediccion_mayo = modelo_simple.predict(mayo_data)
+
+print(f"\n PREDICCIÓN PARA MAYO ")
+print(f"Ventas estimadas de rosas: {prediccion_mayo[0]:.0f} unidades")
+
+# Calcular intervalo de confianza aproximado basado en el error del modelo
+rmse_promedio = models['RMSE'].mean()
+intervalo_inferior = prediccion_mayo[0] - rmse_promedio
+intervalo_superior = prediccion_mayo[0] + rmse_promedio
+
+print(f"Rango estimado: {intervalo_inferior:.0f} - {intervalo_superior:.0f} unidades")
+
+
