@@ -1,0 +1,746 @@
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+from sklearn.ensemble import IsolationForest
+from sklearn.preprocessing import StandardScaler, LabelEncoder
+from sklearn.decomposition import PCA
+from datetime import datetime
+import warnings
+warnings.filterwarnings('ignore')
+
+# Configuración optimizada para grandes datasets
+pd.set_option('display.max_columns', None)
+plt.style.use('default')
+sns.set_palette("husl")
+plt.rcParams['figure.figsize'] = (15, 10)
+plt.rcParams['font.size'] = 10
+
+class ElectroPunoAnomalyDetectorAdvanced:
+    """
+    Detector Avanzado de Anomalías para Electro Puno
+    Optimizado para 343K+ registros con análisis detallado por distritos
+    """
+    
+    def __init__(self, contamination=0.05, random_state=42, chunk_size=10000):
+        """
+        Inicializa el detector avanzado
+        
+        Parameters:
+        - contamination: Proporción esperada de anomalías (5% por defecto)
+        - random_state: Semilla para reproducibilidad
+        - chunk_size: Tamaño de chunks para procesamiento eficiente
+        """
+        self.contamination = contamination
+        self.random_state = random_state
+        self.chunk_size = chunk_size
+        self.scaler = StandardScaler()
+        self.label_encoders = {}
+        self.isolation_forest = IsolationForest(
+            contamination=contamination,
+            random_state=random_state,
+            n_estimators=200,
+            max_samples='auto',
+            n_jobs=-1
+        )
+        self.is_fitted = False
+        self.feature_names = None
+        self.distrito_stats = {}
+        self.provincia_stats = {}
+        
+    def load_and_preprocess_data(self, file_path):
+        """
+        Carga y preprocesa el dataset con optimizaciones de memoria
+        """
+        print("🔄 Cargando dataset de Electro Puno...")
+        
+        # Definir tipos de datos optimizados
+        dtype_dict = {
+            'CODIGO': 'category',
+            'UBIGEO': 'category', 
+            'DEPARTAMENTO': 'category',
+            'PROVINCIA': 'category',
+            'DISTRITO': 'category',
+            'TARIFA': 'category',
+            'PERIODO': 'int32',
+            'CONSUMO': 'float32',
+            'FACTURACIÓN': 'float32',
+            'ESTADO_CLIENTE': 'category'
+        }
+        
+        try:
+            # Cargar datos en chunks para optimizar memoria
+            chunks = []
+            chunk_count = 0
+            for chunk in pd.read_csv(file_path, chunksize=self.chunk_size, dtype=dtype_dict, 
+                                   encoding='utf-8', low_memory=False):
+                chunks.append(chunk)
+                chunk_count += 1
+                if chunk_count % 10 == 0:
+                    print(f"   Procesados {chunk_count * self.chunk_size:,} registros...")
+            
+            data = pd.concat(chunks, ignore_index=True)
+            print(f"✅ Dataset cargado: {len(data):,} registros")
+            
+        except Exception as e:
+            print(f"❌ Error cargando archivo: {e}")
+            return None
+        
+        # Preprocesar y limpiar datos
+        data = self.clean_and_enhance_data(data)
+        
+        return data
+    
+    def clean_and_enhance_data(self, data):
+        """
+        Limpia datos y crea características avanzadas
+        """
+        print("🔧 Limpiando y enriqueciendo datos...")
+        
+        initial_count = len(data)
+        
+        # Limpiar datos básicos
+        data = data[data['CONSUMO'] >= 0]
+        data = data.dropna(subset=['CONSUMO'])
+        
+        if 'FACTURACIÓN' in data.columns:
+            data = data[data['FACTURACIÓN'] >= 0]
+        
+        # Crear características temporales
+        data['AÑO'] = data['PERIODO'] // 100
+        data['MES'] = data['PERIODO'] % 100
+        
+        # Codificar variables categóricas
+        categorical_cols = ['DEPARTAMENTO', 'PROVINCIA', 'DISTRITO', 'TARIFA', 'ESTADO_CLIENTE']
+        for col in categorical_cols:
+            if col in data.columns:
+                le = LabelEncoder()
+                data[f'{col}_ENCODED'] = le.fit_transform(data[col].astype(str))
+                self.label_encoders[col] = le
+        
+        # Crear estadísticas por distrito (CLAVE PARA ANÁLISIS DETALLADO)
+        print("📊 Calculando estadísticas detalladas por distrito...")
+        distrito_stats = data.groupby('DISTRITO')['CONSUMO'].agg([
+            'count', 'mean', 'std', 'median', 'min', 'max',
+            lambda x: x.quantile(0.25), lambda x: x.quantile(0.75)
+        ]).reset_index()
+        distrito_stats.columns = ['DISTRITO', 'COUNT_DISTRITO', 'MEAN_DISTRITO', 'STD_DISTRITO', 
+                                 'MEDIAN_DISTRITO', 'MIN_DISTRITO', 'MAX_DISTRITO', 'Q25_DISTRITO', 'Q75_DISTRITO']
+        
+        # Calcular IQR por distrito
+        distrito_stats['IQR_DISTRITO'] = distrito_stats['Q75_DISTRITO'] - distrito_stats['Q25_DISTRITO']
+        distrito_stats['CV_DISTRITO'] = distrito_stats['STD_DISTRITO'] / (distrito_stats['MEAN_DISTRITO'] + 1e-8)
+        
+        data = data.merge(distrito_stats, on='DISTRITO', how='left')
+        
+        # Crear estadísticas por provincia
+        print("🌎 Calculando estadísticas por provincia...")
+        provincia_stats = data.groupby('PROVINCIA')['CONSUMO'].agg([
+            'count', 'mean', 'std', 'median'
+        ]).reset_index()
+        provincia_stats.columns = ['PROVINCIA', 'COUNT_PROVINCIA', 'MEAN_PROVINCIA', 'STD_PROVINCIA', 'MEDIAN_PROVINCIA']
+        data = data.merge(provincia_stats, on='PROVINCIA', how='left')
+        
+        # Crear estadísticas por tarifa
+        tarifa_stats = data.groupby('TARIFA')['CONSUMO'].agg(['mean', 'std', 'median']).reset_index()
+        tarifa_stats.columns = ['TARIFA', 'MEAN_TARIFA', 'STD_TARIFA', 'MEDIAN_TARIFA']
+        data = data.merge(tarifa_stats, on='TARIFA', how='left')
+        
+        # Características derivadas avanzadas
+        data['Z_SCORE_DISTRITO'] = (data['CONSUMO'] - data['MEAN_DISTRITO']) / (data['STD_DISTRITO'] + 1e-8)
+        data['Z_SCORE_PROVINCIA'] = (data['CONSUMO'] - data['MEAN_PROVINCIA']) / (data['STD_PROVINCIA'] + 1e-8)
+        data['Z_SCORE_TARIFA'] = (data['CONSUMO'] - data['MEAN_TARIFA']) / (data['STD_TARIFA'] + 1e-8)
+        
+        # Percentiles y ratios
+        data['PERCENTILE_DISTRITO'] = data.groupby('DISTRITO')['CONSUMO'].rank(pct=True)
+        data['PERCENTILE_GLOBAL'] = data['CONSUMO'].rank(pct=True)
+        
+        # Indicadores de valores extremos
+        data['ES_OUTLIER_DISTRITO'] = (np.abs(data['Z_SCORE_DISTRITO']) > 3)
+        data['ES_OUTLIER_GLOBAL'] = (np.abs((data['CONSUMO'] - data['CONSUMO'].mean()) / data['CONSUMO'].std()) > 3)
+        
+        if 'FACTURACIÓN' in data.columns:
+            data['RATIO_CONSUMO_FACTURACION'] = data['CONSUMO'] / (data['FACTURACIÓN'] + 1e-8)
+            data['EFICIENCIA_ENERGETICA'] = data['FACTURACIÓN'] / (data['CONSUMO'] + 1e-8)
+        
+        # Guardar estadísticas para análisis posterior
+        self.distrito_stats = distrito_stats.set_index('DISTRITO').to_dict('index')
+        self.provincia_stats = provincia_stats.set_index('PROVINCIA').to_dict('index')
+        
+        cleaned_count = len(data)
+        print(f"✅ Datos procesados: {cleaned_count:,} registros válidos ({initial_count - cleaned_count:,} eliminados)")
+        
+        return data
+    
+    def select_features_for_model(self, data):
+        """
+        Selecciona características optimizadas para detección de anomalías
+        """
+        print("🎯 Seleccionando características para el modelo...")
+        
+        # Características base
+        base_features = ['CONSUMO', 'PERIODO']
+        
+        # Características estadísticas (MUY IMPORTANTES)
+        statistical_features = [
+            'Z_SCORE_DISTRITO', 'Z_SCORE_PROVINCIA', 'Z_SCORE_TARIFA',
+            'PERCENTILE_DISTRITO', 'PERCENTILE_GLOBAL',
+            'MEAN_DISTRITO', 'STD_DISTRITO', 'CV_DISTRITO',
+            'AÑO', 'MES'
+        ]
+        
+        # Características codificadas
+        encoded_features = [col for col in data.columns if col.endswith('_ENCODED')]
+        
+        # Características adicionales si existen
+        if 'FACTURACIÓN' in data.columns:
+            base_features.extend(['FACTURACIÓN', 'RATIO_CONSUMO_FACTURACION', 'EFICIENCIA_ENERGETICA'])
+        
+        # Combinar todas las características
+        all_features = base_features + statistical_features + encoded_features
+        available_features = [f for f in all_features if f in data.columns]
+        
+        print(f"✅ Características seleccionadas: {len(available_features)}")
+        
+        return data[available_features]
+    
+    def fit_predict_anomalies(self, data):
+        """
+        Entrena el modelo y detecta anomalías
+        """
+        print("🤖 Entrenando modelo Isolation Forest...")
+        
+        # Preparar características
+        X = self.select_features_for_model(data)
+        self.feature_names = X.columns.tolist()
+        
+        # Limpiar datos
+        X = X.replace([np.inf, -np.inf], np.nan)
+        X = X.fillna(X.median())
+        
+        print(f"📊 Procesando {len(X):,} registros con {len(self.feature_names)} características")
+        
+        # Normalizar
+        X_scaled = self.scaler.fit_transform(X)
+        
+        # Entrenar y predecir
+        predictions = self.isolation_forest.fit_predict(X_scaled)
+        scores = self.isolation_forest.score_samples(X_scaled)
+        
+        self.is_fitted = True
+        
+        # Estadísticas básicas
+        n_anomalies = np.sum(predictions == -1)
+        anomaly_rate = n_anomalies / len(predictions) * 100
+        
+        print(f"\n🎯 RESULTADOS DE DETECCIÓN:")
+        print(f"   Anomalías detectadas: {n_anomalies:,}")
+        print(f"   Tasa de anomalías: {anomaly_rate:.2f}%")
+        print(f"   Score mínimo: {scores.min():.4f}")
+        print(f"   Score máximo: {scores.max():.4f}")
+        
+        return predictions, scores
+    
+    def analyze_anomalies_detailed(self, data, predictions, scores):
+        """
+        Análisis DETALLADO de anomalías con énfasis en distritos
+        """
+        print("\n📈 ANÁLISIS DETALLADO DE ANOMALÍAS")
+        print("=" * 80)
+        
+        # Agregar resultados
+        data_with_results = data.copy()
+        data_with_results['IS_ANOMALY'] = (predictions == -1)
+        data_with_results['ANOMALY_SCORE'] = scores
+        
+        # Separar datos
+        normal_data = data_with_results[predictions == 1]
+        anomaly_data = data_with_results[predictions == -1]
+        
+        # 1. ANÁLISIS GENERAL
+        print(f"\n📊 ESTADÍSTICAS GENERALES:")
+        print(f"   Total registros: {len(data_with_results):,}")
+        print(f"   Registros normales: {len(normal_data):,}")
+        print(f"   Registros anómalos: {len(anomaly_data):,}")
+        print(f"   Tasa de anomalías: {len(anomaly_data)/len(data_with_results)*100:.2f}%")
+        
+        if len(anomaly_data) > 0:
+            print(f"\n⚡ COMPARACIÓN DE CONSUMO:")
+            print(f"   Consumo promedio normal: {normal_data['CONSUMO'].mean():.2f} kWh")
+            print(f"   Consumo promedio anómalo: {anomaly_data['CONSUMO'].mean():.2f} kWh")
+            print(f"   Diferencia: {anomaly_data['CONSUMO'].mean() - normal_data['CONSUMO'].mean():.2f} kWh")
+            print(f"   Consumo mediano normal: {normal_data['CONSUMO'].median():.2f} kWh")
+            print(f"   Consumo mediano anómalo: {anomaly_data['CONSUMO'].median():.2f} kWh")
+            print(f"   Consumo máximo anómalo: {anomaly_data['CONSUMO'].max():.2f} kWh")
+            print(f"   Consumo mínimo anómalo: {anomaly_data['CONSUMO'].min():.2f} kWh")
+            
+            if 'FACTURACIÓN' in data.columns:
+                print(f"\n💰 COMPARACIÓN DE FACTURACIÓN:")
+                print(f"   Facturación promedio normal: S/ {normal_data['FACTURACIÓN'].mean():.2f}")
+                print(f"   Facturación promedio anómala: S/ {anomaly_data['FACTURACIÓN'].mean():.2f}")
+                print(f"   Diferencia: S/ {anomaly_data['FACTURACIÓN'].mean() - normal_data['FACTURACIÓN'].mean():.2f}")
+        
+        # 2. ANÁLISIS DETALLADO POR DISTRITO
+        print(f"\n🏘️  ANÁLISIS DETALLADO POR DISTRITO")
+        print("=" * 60)
+        
+        # Calcular estadísticas por distrito
+        distrito_analysis = []
+        for distrito in data_with_results['DISTRITO'].unique():
+            distrito_data = data_with_results[data_with_results['DISTRITO'] == distrito]
+            distrito_anomalies = distrito_data[distrito_data['IS_ANOMALY']]
+            
+            total_clientes = len(distrito_data)
+            num_anomalies = len(distrito_anomalies)
+            anomaly_rate = (num_anomalies / total_clientes * 100) if total_clientes > 0 else 0
+            
+            consumo_promedio = distrito_data['CONSUMO'].mean()
+            consumo_anomalo_promedio = distrito_anomalies['CONSUMO'].mean() if len(distrito_anomalies) > 0 else 0
+            
+            distrito_analysis.append({
+                'distrito': distrito,
+                'total_clientes': total_clientes,
+                'anomalias': num_anomalies,
+                'tasa_anomalias': anomaly_rate,
+                'consumo_promedio': consumo_promedio,
+                'consumo_anomalo_promedio': consumo_anomalo_promedio,
+                'score_promedio': distrito_anomalies['ANOMALY_SCORE'].mean() if len(distrito_anomalies) > 0 else 0
+            })
+        
+        # Convertir a DataFrame y ordenar
+        distrito_df = pd.DataFrame(distrito_analysis)
+        distrito_df = distrito_df.sort_values('anomalias', ascending=False)
+        
+        # Mostrar TOP distritos con más anomalías
+        print(f"\n🥇 TOP 15 DISTRITOS CON MÁS ANOMALÍAS:")
+        print("-" * 80)
+        print(f"{'Distrito':<20} {'Clientes':<10} {'Anomalías':<10} {'Tasa %':<8} {'Consumo Prom':<12} {'Score Prom':<10}")
+        print("-" * 80)
+        
+        for _, row in distrito_df.head(15).iterrows():
+            print(f"{row['distrito']:<20} {row['total_clientes']:<10} {row['anomalias']:<10} "
+                  f"{row['tasa_anomalias']:<8.1f} {row['consumo_promedio']:<12.1f} {row['score_promedio']:<10.3f}")
+        
+        # Mostrar distritos con mayor TASA de anomalías
+        distrito_df_tasa = distrito_df[distrito_df['total_clientes'] >= 100].sort_values('tasa_anomalias', ascending=False)
+        
+        print(f"\n📊 TOP 15 DISTRITOS CON MAYOR TASA DE ANOMALÍAS (mín. 100 clientes):")
+        print("-" * 80)
+        print(f"{'Distrito':<20} {'Clientes':<10} {'Anomalías':<10} {'Tasa %':<8} {'Consumo Prom':<12} {'Riesgo':<10}")
+        print("-" * 80)
+        
+        for _, row in distrito_df_tasa.head(15).iterrows():
+            riesgo = "ALTO" if row['tasa_anomalias'] > 10 else "MEDIO" if row['tasa_anomalias'] > 5 else "BAJO"
+            print(f"{row['distrito']:<20} {row['total_clientes']:<10} {row['anomalias']:<10} "
+                  f"{row['tasa_anomalias']:<8.1f} {row['consumo_promedio']:<12.1f} {riesgo:<10}")
+        
+        # 3. ANÁLISIS POR PROVINCIA
+        print(f"\n🌍 ANÁLISIS POR PROVINCIA:")
+        print("-" * 50)
+        provincia_anomalies = anomaly_data['PROVINCIA'].value_counts()
+        provincia_totals = data_with_results['PROVINCIA'].value_counts()
+        
+        for provincia in provincia_anomalies.head(10).index:
+            anomalias = provincia_anomalies[provincia]
+            total = provincia_totals[provincia]
+            tasa = (anomalias / total) * 100
+            print(f"   {provincia}: {anomalias:,} anomalías ({tasa:.1f}% de {total:,} clientes)")
+        
+        # 4. ANÁLISIS POR TARIFA
+        print(f"\n⚡ ANÁLISIS POR TIPO DE TARIFA:")
+        print("-" * 40)
+        tarifa_anomalies = anomaly_data['TARIFA'].value_counts()
+        tarifa_totals = data_with_results['TARIFA'].value_counts()
+        
+        for tarifa in tarifa_anomalies.index:
+            anomalias = tarifa_anomalies[tarifa]
+            total = tarifa_totals[tarifa]
+            tasa = (anomalias / total) * 100
+            print(f"   {tarifa}: {anomalias:,} anomalías ({tasa:.1f}% de {total:,} clientes)")
+        
+        # 5. ANÁLISIS TEMPORAL
+        if len(anomaly_data) > 0:
+            print(f"\n📅 ANÁLISIS TEMPORAL:")
+            print("-" * 30)
+            mes_anomalies = anomaly_data['MES'].value_counts().sort_index()
+            for mes, count in mes_anomalies.items():
+                print(f"   Mes {mes:02d}: {count:,} anomalías")
+        
+        # Guardar análisis detallado
+        self.distrito_analysis_df = distrito_df
+        
+        return data_with_results, distrito_df
+    
+    def create_advanced_visualizations(self, data_with_results, distrito_df, sample_size=50000):
+        """
+        Crea visualizaciones avanzadas con énfasis en análisis por distrito
+        """
+        print(f"\n🎨 Generando visualizaciones avanzadas...")
+        
+        # Muestreo estratificado
+        if len(data_with_results) > sample_size:
+            normal_sample = data_with_results[~data_with_results['IS_ANOMALY']].sample(
+                n=int(sample_size * 0.95), random_state=42
+            )
+            anomaly_sample = data_with_results[data_with_results['IS_ANOMALY']].sample(
+                n=min(int(sample_size * 0.05), len(data_with_results[data_with_results['IS_ANOMALY']])),
+                random_state=42
+            )
+            plot_data = pd.concat([normal_sample, anomaly_sample])
+        else:
+            plot_data = data_with_results
+        
+        # Crear figura con subplots
+        fig = plt.figure(figsize=(24, 20))
+        gs = fig.add_gridspec(3, 3, hspace=0.4, wspace=0.4)
+        
+        fig.suptitle('Análisis Avanzado de Anomalías - Electro Puno\nEnero 2024', fontsize=16, fontweight='bold')
+        
+        # 1. Distribución de consumo (log scale)
+        ax1 = fig.add_subplot(gs[0, 0])
+        normal_consumo = plot_data[~plot_data['IS_ANOMALY']]['CONSUMO']
+        anomaly_consumo = plot_data[plot_data['IS_ANOMALY']]['CONSUMO']
+        
+        ax1.hist(normal_consumo, bins=50, alpha=0.7, label='Normal', density=True, color='lightblue')
+        ax1.hist(anomaly_consumo, bins=50, alpha=0.8, label='Anomalías', density=True, color='red')
+        ax1.set_title('Distribución de Consumo')
+        ax1.set_xlabel('Consumo (kWh)')
+        ax1.set_ylabel('Densidad')
+        ax1.legend()
+        ax1.set_yscale('log')
+        ax1.grid(True, alpha=0.3)
+        
+        # 2. TOP 15 Distritos con más anomalías
+        ax2 = fig.add_subplot(gs[0, 1])
+        top_distritos = distrito_df.head(15)
+        bars = ax2.bar(range(len(top_distritos)), top_distritos['anomalias'], color='coral')
+        ax2.set_title('Top 15 Distritos con Más Anomalías')
+        ax2.set_xlabel('Distritos')
+        ax2.set_ylabel('Número de Anomalías')
+        ax2.set_xticks(range(len(top_distritos)))
+        ax2.set_xticklabels(top_distritos['distrito'], rotation=45, ha='right')
+        
+        # Agregar valores en las barras
+        for i, bar in enumerate(bars):
+            height = bar.get_height()
+            ax2.text(bar.get_x() + bar.get_width()/2., height + height*0.01,
+                    f'{int(height)}', ha='center', va='bottom', fontsize=8)
+        ax2.grid(True, alpha=0.3)
+        
+        # 3. Tasa de anomalías por distrito (top 15)
+        ax3 = fig.add_subplot(gs[0, 2])
+        distrito_tasa = distrito_df[distrito_df['total_clientes'] >= 100].head(15)
+        colors = ['red' if x > 10 else 'orange' if x > 5 else 'lightgreen' for x in distrito_tasa['tasa_anomalias']]
+        bars = ax3.bar(range(len(distrito_tasa)), distrito_tasa['tasa_anomalias'], color=colors)
+        ax3.set_title('Tasa de Anomalías por Distrito (≥100 clientes)')
+        ax3.set_xlabel('Distritos')
+        ax3.set_ylabel('Tasa de Anomalías (%)')
+        ax3.set_xticks(range(len(distrito_tasa)))
+        ax3.set_xticklabels(distrito_tasa['distrito'], rotation=45, ha='right')
+        
+        # Líneas de referencia
+        ax3.axhline(y=5, color='orange', linestyle='--', alpha=0.7, label='Riesgo Medio (5%)')
+        ax3.axhline(y=10, color='red', linestyle='--', alpha=0.7, label='Riesgo Alto (10%)')
+        ax3.legend()
+        ax3.grid(True, alpha=0.3)
+        
+        # 4. Scores de anomalía vs Consumo
+        ax4 = fig.add_subplot(gs[1, 0])
+        scatter_sample = plot_data.sample(n=min(10000, len(plot_data)), random_state=42)
+        colors = ['red' if x else 'blue' for x in scatter_sample['IS_ANOMALY']]
+        ax4.scatter(scatter_sample['CONSUMO'], scatter_sample['ANOMALY_SCORE'], 
+                   c=colors, alpha=0.6, s=1)
+        ax4.set_title('Consumo vs Score de Anomalía')
+        ax4.set_xlabel('Consumo (kWh)')
+        ax4.set_ylabel('Score de Anomalía')
+        ax4.grid(True, alpha=0.3)
+        
+        # 5. Anomalías por provincia
+        ax5 = fig.add_subplot(gs[1, 1])
+        provincia_counts = plot_data[plot_data['IS_ANOMALY']]['PROVINCIA'].value_counts().head(10)
+        provincia_counts.plot(kind='bar', ax=ax5, color='lightcoral')
+        ax5.set_title('Top 10 Provincias con Más Anomalías')
+        ax5.set_xlabel('Provincia')
+        ax5.set_ylabel('Número de Anomalías')
+        ax5.tick_params(axis='x', rotation=45)
+        ax5.grid(True, alpha=0.3)
+        
+        # 6. Anomalías por tipo de tarifa
+        ax6 = fig.add_subplot(gs[1, 2])
+        tarifa_counts = plot_data[plot_data['IS_ANOMALY']]['TARIFA'].value_counts()
+        wedges, texts, autotexts = ax6.pie(tarifa_counts.values, labels=tarifa_counts.index, 
+                                          autopct='%1.1f%%', startangle=90)
+        ax6.set_title('Distribución de Anomalías por Tarifa')
+        
+        # 7. Heatmap de anomalías por distrito y mes
+        ax7 = fig.add_subplot(gs[2, 0])
+        if 'MES' in plot_data.columns:
+            heatmap_data = plot_data[plot_data['IS_ANOMALY']].groupby(['DISTRITO', 'MES']).size().unstack(fill_value=0)
+            # Tomar solo los top 10 distritos para legibilidad
+            top_distritos_heatmap = distrito_df.head(10)['distrito'].tolist()
+            heatmap_data_filtered = heatmap_data.loc[heatmap_data.index.isin(top_distritos_heatmap)]
+            
+            sns.heatmap(heatmap_data_filtered, ax=ax7, cmap='Reds', annot=True, fmt='d', 
+                       cbar_kws={'label': 'Número de Anomalías'})
+            ax7.set_title('Heatmap: Anomalías por Distrito y Mes')
+            ax7.set_xlabel('Mes')
+            ax7.set_ylabel('Distrito')
+        
+        # 8. Boxplot comparativo de consumo
+        ax8 = fig.add_subplot(gs[2, 1])
+        boxplot_data = [
+            plot_data[~plot_data['IS_ANOMALY']]['CONSUMO'],
+            plot_data[plot_data['IS_ANOMALY']]['CONSUMO']
+        ]
+        box_plot = ax8.boxplot(boxplot_data, labels=['Normal', 'Anomalías'], patch_artist=True)
+        box_plot['boxes'][0].set_facecolor('lightblue')
+        box_plot['boxes'][1].set_facecolor('lightcoral')
+        ax8.set_title('Distribución de Consumo: Normal vs Anomalías')
+        ax8.set_ylabel('Consumo (kWh)')
+        ax8.set_yscale('log')
+        ax8.grid(True, alpha=0.3)
+        
+        # 9. Distribución de scores de anomalía
+        ax9 = fig.add_subplot(gs[2, 2])
+        ax9.hist(plot_data['ANOMALY_SCORE'], bins=50, alpha=0.7, color='skyblue', edgecolor='black')
+        threshold = plot_data[plot_data['IS_ANOMALY']]['ANOMALY_SCORE'].max()
+        ax9.axvline(threshold, color='red', linestyle='--', linewidth=2, 
+                   label=f'Umbral: {threshold:.3f}')
+        ax9.set_title('Distribución de Scores de Anomalía')
+        ax9.set_xlabel('Score de Anomalía')
+        ax9.set_ylabel('Frecuencia')
+        ax9.legend()
+        ax9.grid(True, alpha=0.3)
+        
+        plt.tight_layout()
+        plt.show()
+    
+    def export_detailed_results(self, data_with_results, distrito_df):
+    
+        print("\n💾 Exportando resultados detallados...")
+        
+        # 1. Exportar todas las anomalías
+        anomalies = data_with_results[data_with_results['IS_ANOMALY'] == True].copy()
+        anomalies_sorted = anomalies.sort_values(['DISTRITO', 'ANOMALY_SCORE'])
+        
+        # Seleccionar columnas importantes para exportar
+        export_columns = [
+            'CODIGO', 'UBIGEO', 'DEPARTAMENTO', 'PROVINCIA', 'DISTRITO', 
+            'TARIFA', 'PERIODO', 'CONSUMO', 'ANOMALY_SCORE', 'Z_SCORE_DISTRITO',
+            'PERCENTILE_DISTRITO', 'MEAN_DISTRITO', 'STD_DISTRITO'
+        ]
+        
+        # Filtrar solo las columnas que existen
+        available_columns = [col for col in export_columns if col in anomalies_sorted.columns]
+        if 'FACTURACIÓN' in anomalies_sorted.columns:
+            available_columns.append('FACTURACIÓN')
+        if 'ESTADO_CLIENTE' in anomalies_sorted.columns:
+            available_columns.append('ESTADO_CLIENTE')
+        
+        anomalies_export = anomalies_sorted[available_columns]
+        
+        # Crear timestamp para nombres de archivo
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        
+        # Exportar archivos
+        try:
+            # Archivo 1: Todas las anomalías
+            filename_anomalies = f"anomalias_electro_puno_{timestamp}.csv"
+            anomalies_export.to_csv(filename_anomalies, index=False, encoding='utf-8-sig')
+            print(f"✅ Exportado: {filename_anomalies} ({len(anomalies_export):,} anomalías)")
+            
+            # Archivo 2: Resumen por distrito
+            filename_distrito = f"resumen_distritos_{timestamp}.csv"
+            distrito_df.to_csv(filename_distrito, index=False, encoding='utf-8-sig')
+            print(f"✅ Exportado: {filename_distrito} ({len(distrito_df)} distritos)")
+            
+            # Archivo 3: Anomalías críticas (top 10% más extremas)
+            critical_threshold = anomalies['ANOMALY_SCORE'].quantile(0.1)  # 10% más bajas (más anómalas)
+            critical_anomalies = anomalies[anomalies['ANOMALY_SCORE'] <= critical_threshold]
+            
+            filename_critical = f"anomalias_criticas_{timestamp}.csv"
+            critical_anomalies[available_columns].to_csv(filename_critical, index=False, encoding='utf-8-sig')
+            print(f"✅ Exportado: {filename_critical} ({len(critical_anomalies):,} anomalías críticas)")
+            
+            # Archivo 4: Estadísticas generales
+            stats_summary = {
+                'Métrica': [
+                    'Total de registros',
+                    'Total de anomalías',
+                    'Tasa de anomalías (%)',
+                    'Consumo promedio normal (kWh)',
+                    'Consumo promedio anómalo (kWh)',
+                    'Score promedio anomalías',
+                    'Distritos con anomalías',
+                    'Provincias con anomalías'
+                ],
+                'Valor': [
+                    len(data_with_results),
+                    len(anomalies),
+                    f"{len(anomalies)/len(data_with_results)*100:.2f}",
+                    f"{data_with_results[~data_with_results['IS_ANOMALY']]['CONSUMO'].mean():.2f}",
+                    f"{anomalies['CONSUMO'].mean():.2f}",
+                    f"{anomalies['ANOMALY_SCORE'].mean():.4f}",
+                    anomalies['DISTRITO'].nunique(),
+                    anomalies['PROVINCIA'].nunique()
+                ]
+            }
+            
+            stats_df = pd.DataFrame(stats_summary)
+            filename_stats = f"estadisticas_generales_{timestamp}.csv"
+            stats_df.to_csv(filename_stats, index=False, encoding='utf-8-sig')
+            print(f"✅ Exportado: {filename_stats}")
+            
+            # Archivo 5: Top distritos problemáticos
+            top_problematic = distrito_df[
+                (distrito_df['total_clientes'] >= 50) & 
+                (distrito_df['tasa_anomalias'] > distrito_df['tasa_anomalias'].quantile(0.8))
+            ].head(20)
+            
+            filename_problematic = f"distritos_problematicos_{timestamp}.csv"
+            top_problematic.to_csv(filename_problematic, index=False, encoding='utf-8-sig')
+            print(f"✅ Exportado: {filename_problematic} ({len(top_problematic)} distritos problemáticos)")
+            
+            print(f"\n📁 Todos los archivos exportados con timestamp: {timestamp}")
+            
+            return {
+                'anomalies_file': filename_anomalies,
+                'distrito_file': filename_distrito,
+                'critical_file': filename_critical,
+                'stats_file': filename_stats,
+                'problematic_file': filename_problematic,
+                'timestamp': timestamp
+            }
+            
+        except Exception as e:
+            print(f"❌ Error al exportar archivos: {e}")
+            return None
+
+    def generate_summary_report(self, data_with_results, distrito_df, export_info=None):
+        """
+        Genera un reporte resumen en texto
+        """
+        print("\n📋 Generando reporte resumen...")
+        
+        # Calcular estadísticas principales
+        total_records = len(data_with_results)
+        total_anomalies = len(data_with_results[data_with_results['IS_ANOMALY']])
+        anomaly_rate = (total_anomalies / total_records) * 100
+        
+        normal_data = data_with_results[~data_with_results['IS_ANOMALY']]
+        anomaly_data = data_with_results[data_with_results['IS_ANOMALY']]
+        
+        # Crear reporte
+        report = f"""
+    {'='*80}
+        REPORTE DE ANÁLISIS DE ANOMALÍAS - ELECTRO PUNO
+        Fecha: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+    {'='*80}
+
+    RESUMEN EJECUTIVO:
+    - Total de registros analizados: {total_records:,}
+    - Anomalías detectadas: {total_anomalies:,}
+    - Tasa de anomalías: {anomaly_rate:.2f}%
+    - Algoritmo usado: Isolation Forest (contamination={self.contamination})
+
+    ESTADÍSTICAS DE CONSUMO:
+    - Consumo promedio normal: {normal_data['CONSUMO'].mean():.2f} kWh
+    - Consumo promedio anómalo: {anomaly_data['CONSUMO'].mean():.2f} kWh
+    - Diferencia: {anomaly_data['CONSUMO'].mean() - normal_data['CONSUMO'].mean():+.2f} kWh
+    - Consumo máximo anómalo: {anomaly_data['CONSUMO'].max():.2f} kWh
+    - Consumo mínimo anómalo: {anomaly_data['CONSUMO'].min():.2f} kWh
+
+    ANÁLISIS GEOGRÁFICO:
+    - Distritos con anomalías: {anomaly_data['DISTRITO'].nunique()}
+    - Provincias con anomalías: {anomaly_data['PROVINCIA'].nunique()}
+
+    TOP 5 DISTRITOS MÁS PROBLEMÁTICOS:
+    """
+        
+        # Agregar top 5 distritos
+        top5_distritos = distrito_df.head(5)
+        for i, (_, row) in enumerate(top5_distritos.iterrows(), 1):
+            report += f"{i}. {row['distrito']}: {row['anomalias']} anomalías ({row['tasa_anomalias']:.1f}% de {row['total_clientes']} clientes)\n"
+        
+        # Agregar información de archivos exportados
+        if export_info:
+            report += f"\nARCHIVOS GENERADOS:\n"
+            for key, filename in export_info.items():
+                if key != 'timestamp':
+                    report += f"- {filename}\n"
+        
+        report += f"\n{'='*80}\n"
+        
+        # Guardar reporte
+        if export_info:
+            report_filename = f"reporte_resumen_{export_info['timestamp']}.txt"
+        else:
+            report_filename = f"reporte_resumen_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
+        
+        try:
+            with open(report_filename, 'w', encoding='utf-8') as f:
+                f.write(report)
+            print(f"✅ Reporte guardado: {report_filename}")
+        except Exception as e:
+            print(f"❌ Error guardando reporte: {e}")
+        
+        # También imprimir en consola
+        print(report)
+        
+        return report_filename
+
+    # Método principal para ejecutar todo el análisis
+    def run_complete_analysis(self, file_path):
+        """
+        Ejecuta el análisis completo de anomalías
+        """
+        print("🚀 Iniciando análisis completo de anomalías de Electro Puno...")
+        print("="*80)
+        
+        try:
+            # 1. Cargar y preprocesar datos
+            data = self.load_and_preprocess_data(file_path)
+            if data is None:
+                return False
+            
+            # 2. Detectar anomalías
+            predictions, scores = self.fit_predict_anomalies(data)
+            
+            # 3. Análisis detallado
+            data_with_results, distrito_df = self.analyze_anomalies_detailed(data, predictions, scores)
+            
+            # 4. Crear visualizaciones
+            self.create_advanced_visualizations(data_with_results, distrito_df)
+            
+            # 5. Exportar resultados
+            export_info = self.export_detailed_results(data_with_results, distrito_df)
+            
+            # 6. Generar reporte resumen
+            self.generate_summary_report(data_with_results, distrito_df, export_info)
+            
+            print("\n🎉 ¡Análisis completo finalizado exitosamente!")
+            return True
+            
+        except Exception as e:
+            print(f"\n❌ Error durante el análisis: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+
+    # Ejemplo de uso
+if __name__ == "__main__":
+        # Crear instancia del detector
+        detector = ElectroPunoAnomalyDetectorAdvanced(
+            contamination=0.05,  # 5% de anomalías esperadas
+            random_state=42,
+            chunk_size=15000     # Ajustar según memoria disponible
+        )
+        
+        # Ejecutar análisis completo
+        file_path = "reporte.csv"  # Reemplazar con tu archivo
+        success = detector.run_complete_analysis(file_path)
+        
+        if success:
+            print("\n✅ Revisa los archivos CSV y el reporte generados.")
+        else:
+            print("\n❌ El análisis no se completó correctamente.")
