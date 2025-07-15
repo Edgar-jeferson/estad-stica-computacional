@@ -1,0 +1,173 @@
+library(shiny)
+library(ggplot2)
+library(dplyr)
+
+# Función para generar posiciones iniciales aleatorias
+generate_initial_positions <- function(n_agents = 100) {
+  data.frame(
+    agent_id = 1:n_agents,
+    x = sample(1:10, n_agents, replace = TRUE),
+    y = sample(1:10, n_agents, replace = TRUE),
+    step = 0
+  )
+}
+
+# Función para mover agentes un paso
+move_agents <- function(agents_df, step_number) {
+  # Direcciones posibles: arriba, abajo, izquierda, derecha
+  directions <- list(
+    c(0, 1),   # arriba
+    c(0, -1),  # abajo
+    c(-1, 0),  # izquierda
+    c(1, 0)    # derecha
+  )
+  
+  moved_agents <- agents_df %>%
+    mutate(
+      direction = sample(1:4, n(), replace = TRUE),
+      x_new = x + sapply(direction, function(d) directions[[d]][1]),
+      y_new = y + sapply(direction, function(d) directions[[d]][2]),
+      # Mantener agentes dentro de la cuadrícula (1-10)
+      x = pmax(1, pmin(10, x_new)),
+      y = pmax(1, pmin(10, y_new)),
+      step = step_number
+    ) %>%
+    select(agent_id, x, y, step)
+  
+  return(moved_agents)
+}
+
+# Función para ejecutar toda la simulación
+run_simulation <- function(n_agents = 100, n_steps = 10) {
+  # Inicializar agentes
+  all_positions <- generate_initial_positions(n_agents)
+  current_positions <- all_positions
+  
+  # Ejecutar pasos de simulación
+  for(step in 1:n_steps) {
+    current_positions <- move_agents(current_positions, step)
+    all_positions <- rbind(all_positions, current_positions)
+  }
+  
+  return(all_positions)
+}
+
+# UI
+ui <- fluidPage(
+  titlePanel("Simulación de 100 Agentes en Cuadrícula 10x10"),
+  
+  sidebarLayout(
+    sidebarPanel(
+      actionButton("run_sim", "Ejecutar Nueva Simulación", 
+                   class = "btn-primary"),
+      hr(),
+      sliderInput("step_slider", "Paso de Tiempo:",
+                  min = 0, max = 10, value = 0, step = 1,
+                  animate = animationOptions(interval = 800, loop = FALSE)),
+      hr(),
+      h4("Controles:"),
+      p("• Haz clic en 'Ejecutar Nueva Simulación' para generar nuevas posiciones aleatorias"),
+      p("• Usa el slider o el botón 'Play' para ver la evolución temporal"),
+      p("• Cada punto representa un agente"),
+      hr(),
+      h4("Estadísticas del Paso Actual:"),
+      textOutput("step_info"),
+      textOutput("density_info")
+    ),
+    
+    mainPanel(
+      plotOutput("simulation_plot", height = "600px"),
+      hr(),
+      h4("Descripción:"),
+      p("Esta simulación muestra 100 agentes moviéndose aleatoriamente en una cuadrícula de 10x10. 
+        En cada paso de tiempo, cada agente se mueve una unidad en una dirección aleatoria 
+        (arriba, abajo, izquierda o derecha). Los agentes no pueden salir de la cuadrícula.")
+    )
+  )
+)
+
+# Server
+server <- function(input, output, session) {
+  # Datos reactivos para almacenar la simulación
+  simulation_data <- reactiveVal(NULL)
+  
+  # Generar simulación inicial al cargar la app
+  observe({
+    simulation_data(run_simulation())
+  })
+  
+  # Ejecutar nueva simulación cuando se presiona el botón
+  observeEvent(input$run_sim, {
+    simulation_data(run_simulation())
+    updateSliderInput(session, "step_slider", value = 0)
+  })
+  
+  # Datos filtrados por paso de tiempo
+  current_step_data <- reactive({
+    req(simulation_data())
+    simulation_data() %>%
+      filter(step == input$step_slider)
+  })
+  
+  # Gráfico principal
+  output$simulation_plot <- renderPlot({
+    req(current_step_data())
+    
+    # Contar agentes por posición para mostrar densidad
+    position_counts <- current_step_data() %>%
+      count(x, y, name = "n_agents")
+    
+    # Crear cuadrícula completa para el fondo
+    grid_background <- expand.grid(x = 1:10, y = 1:10)
+    
+    ggplot() +
+      # Fondo de cuadrícula
+      geom_tile(data = grid_background, aes(x = x, y = y), 
+                fill = "white", color = "lightgray", size = 0.5) +
+      # Agentes con tamaño proporcional a la densidad
+      geom_point(data = position_counts, aes(x = x, y = y, size = n_agents), 
+                 color = "steelblue", alpha = 0.7) +
+      scale_size_continuous(range = c(1, 8), name = "Agentes\nen posición") +
+      scale_x_continuous(breaks = 1:10, limits = c(0.5, 10.5)) +
+      scale_y_continuous(breaks = 1:10, limits = c(0.5, 10.5)) +
+      labs(title = paste("Paso", input$step_slider, "de 10"),
+           x = "Posición X", y = "Posición Y") +
+      theme_minimal() +
+      theme(
+        panel.grid = element_blank(),
+        plot.title = element_text(size = 16, hjust = 0.5),
+        axis.title = element_text(size = 12),
+        legend.position = "right"
+      ) +
+      coord_fixed()
+  })
+  
+  # Información del paso actual
+  output$step_info <- renderText({
+    req(current_step_data())
+    n_agents <- nrow(current_step_data())
+    paste("Paso:", input$step_slider, "| Agentes:", n_agents)
+  })
+  
+  # Información de densidad
+  output$density_info <- renderText({
+    req(current_step_data())
+    
+    # Calcular posiciones únicas ocupadas
+    unique_positions <- current_step_data() %>%
+      distinct(x, y) %>%
+      nrow()
+    
+    # Calcular densidad promedio
+    if(unique_positions > 0) {
+      avg_density <- round(nrow(current_step_data()) / unique_positions, 2)
+      paste("Posiciones ocupadas:", unique_positions, "de 100 |", 
+            "Densidad promedio:", avg_density, "agentes/posición")
+    } else {
+      "No hay datos para este paso"
+    }
+  })
+}
+
+# Ejecutar la aplicación
+shinyApp(ui = ui, server = server)
