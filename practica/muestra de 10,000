@@ -1,0 +1,411 @@
+library(shiny)
+library(ggplot2)
+library(dplyr)
+library(DT)
+library(plotly)
+
+# UI
+ui <- fluidPage(
+  titlePanel("Simulación: Distribución Normal Estándar (N(0,1))"),
+  
+  sidebarLayout(
+    sidebarPanel(
+      h4("Parámetros de la Simulación"),
+      numericInput("n_muestras", "Número de muestras:", 
+                   value = 10000, min = 1000, max = 100000, step = 1000),
+      hr(),
+      actionButton("generar", "Generar Nueva Muestra", 
+                   class = "btn-primary", style = "width: 100%"),
+      br(), br(),
+      
+      h4("Parámetros Teóricos"),
+      div(style = "background-color: #e3f2fd; padding: 10px; border-radius: 5px;",
+          p(strong("Media teórica (μ):"), "0"),
+          p(strong("Desviación estándar teórica (σ):"), "1"),
+          p(strong("Varianza teórica (σ²):"), "1")
+      ),
+      
+      hr(),
+      h4("Estadísticas Muestrales"),
+      tableOutput("estadisticas_basicas"),
+      
+      hr(),
+      h4("Comparación de Percentiles"),
+      p("Percentiles teóricos vs muestrales:"),
+      tableOutput("percentiles")
+    ),
+    
+    mainPanel(
+      tabsetPanel(
+        tabPanel("Comparación Gráfica",
+                 fluidRow(
+                   column(12,
+                          h4("Histograma con Curva Normal Teórica"),
+                          plotOutput("histograma_principal", height = "500px")
+                   )
+                 ),
+                 br(),
+                 fluidRow(
+                   column(6,
+                          h4("Función de Densidad"),
+                          plotOutput("densidad_comparacion", height = "350px")
+                   ),
+                   column(6,
+                          h4("Función de Distribución Acumulada"),
+                          plotOutput("cdf_comparacion", height = "350px")
+                   )
+                 )
+        ),
+        
+        tabPanel("Análisis de Normalidad",
+                 fluidRow(
+                   column(6,
+                          h4("Gráfico Q-Q Normal"),
+                          plotOutput("qqplot", height = "400px")
+                   ),
+                   column(6,
+                          h4("Diagrama de Caja"),
+                          plotOutput("boxplot", height = "400px")
+                   )
+                 ),
+                 br(),
+                 fluidRow(
+                   column(12,
+                          h4("Prueba de Normalidad"),
+                          div(style = "background-color: #f8f9fa; padding: 15px; border-radius: 5px;",
+                              verbatimTextOutput("prueba_normalidad"))
+                   )
+                 )
+        ),
+        
+        tabPanel("Estadísticas Detalladas",
+                 fluidRow(
+                   column(6,
+                          h4("Resumen Estadístico"),
+                          verbatimTextOutput("resumen_completo")
+                   ),
+                   column(6,
+                          h4("Momentos de la Distribución"),
+                          tableOutput("momentos")
+                   )
+                 ),
+                 br(),
+                 fluidRow(
+                   column(12,
+                          h4("Intervalos de Confianza"),
+                          tableOutput("intervalos_confianza")
+                   )
+                 )
+        ),
+        
+        tabPanel("Datos",
+                 h4("Muestra Generada"),
+                 p("Mostrando las primeras 200 observaciones:"),
+                 DT::dataTableOutput("tabla_datos")
+        )
+      )
+    )
+  )
+)
+
+# Server
+server <- function(input, output, session) {
+  
+  # Datos reactivos
+  datos <- reactiveVal(NULL)
+  
+  # Generar datos iniciales
+  observe({
+    set.seed(123)  # Para reproducibilidad inicial
+    datos(rnorm(input$n_muestras, mean = 0, sd = 1))
+  })
+  
+  # Generar nueva muestra
+  observeEvent(input$generar, {
+    datos(rnorm(input$n_muestras, mean = 0, sd = 1))
+  })
+  
+  # Cálculos estadísticos reactivos
+  estadisticas <- reactive({
+    req(datos())
+    muestra <- datos()
+    
+    list(
+      media = mean(muestra),
+      desv_std = sd(muestra),
+      varianza = var(muestra),
+      n = length(muestra),
+      min = min(muestra),
+      max = max(muestra),
+      q1 = quantile(muestra, 0.25),
+      mediana = median(muestra),
+      q3 = quantile(muestra, 0.75),
+      asimetria = moments::skewness(muestra),
+      curtosis = moments::kurtosis(muestra)
+    )
+  })
+  
+  # Estadísticas básicas
+  output$estadisticas_basicas <- renderTable({
+    req(estadisticas())
+    stats <- estadisticas()
+    
+    data.frame(
+      Estadística = c("Media muestral", "Desviación estándar", "Varianza", "Tamaño de muestra"),
+      Valor = c(
+        round(stats$media, 6),
+        round(stats$desv_std, 6),
+        round(stats$varianza, 6),
+        stats$n
+      ),
+      `Valor Teórico` = c(0, 1, 1, stats$n),
+      Diferencia = c(
+        round(stats$media - 0, 6),
+        round(stats$desv_std - 1, 6),
+        round(stats$varianza - 1, 6),
+        0
+      )
+    )
+  }, striped = TRUE, bordered = TRUE)
+  
+  # Comparación de percentiles
+  output$percentiles <- renderTable({
+    req(datos())
+    muestra <- datos()
+    
+    percentiles <- c(0.01, 0.05, 0.10, 0.25, 0.50, 0.75, 0.90, 0.95, 0.99)
+    
+    data.frame(
+      Percentil = paste0(percentiles * 100, "%"),
+      Teórico = round(qnorm(percentiles, 0, 1), 3),
+      Muestral = round(quantile(muestra, percentiles), 3)
+    )
+  }, striped = TRUE, bordered = TRUE)
+  
+  # Histograma principal
+  output$histograma_principal <- renderPlot({
+    req(datos())
+    muestra <- datos()
+    stats <- estadisticas()
+    
+    # Crear secuencia para curva teórica
+    x_range <- range(muestra)
+    x_teorico <- seq(x_range[1] - 1, x_range[2] + 1, length.out = 500)
+    y_teorico <- dnorm(x_teorico, 0, 1)
+    
+    # Data frames
+    df_muestra <- data.frame(valores = muestra)
+    df_teorico <- data.frame(x = x_teorico, y = y_teorico)
+    
+    ggplot(df_muestra, aes(x = valores)) +
+      geom_histogram(aes(y = ..density..), bins = 50, 
+                     fill = "lightblue", color = "white", alpha = 0.7) +
+      geom_line(data = df_teorico, aes(x = x, y = y), 
+                color = "red", size = 1.5, linetype = "solid") +
+      geom_vline(xintercept = stats$media, color = "blue", linetype = "dashed", size = 1) +
+      geom_vline(xintercept = 0, color = "red", linetype = "dotted", size = 1) +
+      labs(title = "Distribución Empírica vs Teórica N(0,1)",
+           subtitle = paste("n =", length(muestra), "| Media muestral =", round(stats$media, 4), 
+                            "| SD muestral =", round(stats$desv_std, 4)),
+           x = "Valores", y = "Densidad",
+           caption = "Línea roja: densidad teórica | Línea azul: media muestral | Línea roja punteada: media teórica") +
+      theme_minimal() +
+      theme(plot.title = element_text(hjust = 0.5, size = 14),
+            plot.subtitle = element_text(hjust = 0.5, size = 12))
+  })
+  
+  # Comparación de densidades
+  output$densidad_comparacion <- renderPlot({
+    req(datos())
+    muestra <- datos()
+    
+    x_vals <- seq(-4, 4, length.out = 200)
+    
+    # Densidad teórica
+    df_teorico <- data.frame(
+      x = x_vals,
+      densidad = dnorm(x_vals, 0, 1),
+      tipo = "Teórica N(0,1)"
+    )
+    
+    # Densidad empírica (usando kde)
+    kde_result <- density(muestra, n = 200)
+    df_empirico <- data.frame(
+      x = kde_result$x,
+      densidad = kde_result$y,
+      tipo = "Empírica"
+    )
+    
+    df_combined <- rbind(df_teorico, df_empirico)
+    
+    ggplot(df_combined, aes(x = x, y = densidad, color = tipo)) +
+      geom_line(size = 1.2) +
+      scale_color_manual(values = c("Teórica N(0,1)" = "red", "Empírica" = "blue")) +
+      labs(title = "Comparación de Densidades",
+           x = "Valores", y = "Densidad", color = "Tipo") +
+      theme_minimal() +
+      theme(legend.position = "bottom")
+  })
+  
+  # Comparación de CDFs
+  output$cdf_comparacion <- renderPlot({
+    req(datos())
+    muestra <- datos()
+    
+    x_vals <- seq(-4, 4, length.out = 200)
+    
+    # CDF teórica
+    df_teorico <- data.frame(
+      x = x_vals,
+      cdf = pnorm(x_vals, 0, 1),
+      tipo = "Teórica N(0,1)"
+    )
+    
+    # CDF empírica
+    df_empirico <- data.frame(
+      x = sort(muestra),
+      cdf = ecdf(muestra)(sort(muestra)),
+      tipo = "Empírica"
+    )
+    
+    ggplot() +
+      geom_line(data = df_teorico, aes(x = x, y = cdf, color = tipo), size = 1.2) +
+      geom_step(data = df_empirico, aes(x = x, y = cdf, color = tipo), size = 0.8) +
+      scale_color_manual(values = c("Teórica N(0,1)" = "red", "Empírica" = "blue")) +
+      labs(title = "Función de Distribución Acumulada",
+           x = "Valores", y = "Probabilidad Acumulada", color = "Tipo") +
+      theme_minimal() +
+      theme(legend.position = "bottom")
+  })
+  
+  # Q-Q Plot
+  output$qqplot <- renderPlot({
+    req(datos())
+    muestra <- datos()
+    
+    df <- data.frame(sample = muestra)
+    
+    ggplot(df, aes(sample = sample)) +
+      stat_qq(color = "blue", alpha = 0.6) +
+      stat_qq_line(color = "red", linetype = "dashed", size = 1) +
+      labs(title = "Gráfico Q-Q Normal",
+           subtitle = "Cuantiles muestrales vs teóricos N(0,1)",
+           x = "Cuantiles Teóricos", y = "Cuantiles Muestrales") +
+      theme_minimal()
+  })
+  
+  # Boxplot
+  output$boxplot <- renderPlot({
+    req(datos())
+    muestra <- datos()
+    
+    df <- data.frame(valores = muestra, grupo = "Muestra N(0,1)")
+    
+    ggplot(df, aes(x = grupo, y = valores)) +
+      geom_boxplot(fill = "lightblue", alpha = 0.7, outlier.alpha = 0.3) +
+      geom_hline(yintercept = 0, color = "red", linetype = "dashed") +
+      geom_hline(yintercept = c(-1, 1), color = "orange", linetype = "dotted") +
+      labs(title = "Diagrama de Caja",
+           subtitle = "Línea roja: media teórica | Líneas naranjas: ±1 desviación estándar",
+           x = "", y = "Valores") +
+      theme_minimal()
+  })
+  
+  # Prueba de normalidad
+  output$prueba_normalidad <- renderText({
+    req(datos())
+    muestra <- datos()
+    
+    # Shapiro-Wilk (solo para muestras <= 5000)
+    if (length(muestra) <= 5000) {
+      shapiro_test <- shapiro.test(muestra)
+      shapiro_result <- paste("Shapiro-Wilk Test:\n",
+                              "W =", round(shapiro_test$statistic, 6),
+                              ", p-value =", format(shapiro_test$p.value, scientific = TRUE))
+    } else {
+      shapiro_result <- "Shapiro-Wilk Test: No aplicable (muestra > 5000)"
+    }
+    
+    # Kolmogorov-Smirnov
+    ks_test <- ks.test(muestra, "pnorm", 0, 1)
+    ks_result <- paste("Kolmogorov-Smirnov Test:\n",
+                       "D =", round(ks_test$statistic, 6),
+                       ", p-value =", format(ks_test$p.value, scientific = TRUE))
+    
+    paste(shapiro_result, "\n\n", ks_result,
+          "\n\nInterpretación:",
+          "\n- p-value > 0.05: No se rechaza H0 (datos siguen distribución normal)",
+          "\n- p-value ≤ 0.05: Se rechaza H0 (datos no siguen distribución normal)")
+  })
+  
+  # Momentos de la distribución
+  output$momentos <- renderTable({
+    req(estadisticas())
+    stats <- estadisticas()
+    
+    data.frame(
+      Momento = c("Media", "Varianza", "Asimetría", "Curtosis"),
+      Muestral = c(
+        round(stats$media, 6),
+        round(stats$varianza, 6),
+        round(stats$asimetria, 6),
+        round(stats$curtosis, 6)
+      ),
+      Teórico = c(0, 1, 0, 3),
+      Interpretación = c(
+        "Centro de la distribución",
+        "Dispersión de los datos",
+        "Simetría (0 = simétrica)",
+        "Forma de las colas (3 = normal)"
+      )
+    )
+  }, striped = TRUE, bordered = TRUE)
+  
+  # Intervalos de confianza
+  output$intervalos_confianza <- renderTable({
+    req(estadisticas())
+    stats <- estadisticas()
+    
+    # IC para la media
+    error_media <- qt(0.975, stats$n - 1) * stats$desv_std / sqrt(stats$n)
+    ic_media_inf <- stats$media - error_media
+    ic_media_sup <- stats$media + error_media
+    
+    # IC para la varianza
+    ic_var_inf <- (stats$n - 1) * stats$varianza / qchisq(0.975, stats$n - 1)
+    ic_var_sup <- (stats$n - 1) * stats$varianza / qchisq(0.025, stats$n - 1)
+    
+    data.frame(
+      Parámetro = c("Media", "Varianza"),
+      `Límite Inferior` = c(round(ic_media_inf, 6), round(ic_var_inf, 6)),
+      `Límite Superior` = c(round(ic_media_sup, 6), round(ic_var_sup, 6)),
+      `Valor Teórico` = c(0, 1),
+      `Contiene Valor Teórico` = c(
+        ifelse(0 >= ic_media_inf & 0 <= ic_media_sup, "Sí", "No"),
+        ifelse(1 >= ic_var_inf & 1 <= ic_var_sup, "Sí", "No")
+      )
+    )
+  }, striped = TRUE, bordered = TRUE)
+  
+  # Resumen completo
+  output$resumen_completo <- renderText({
+    req(datos())
+    capture.output(summary(datos()))
+  })
+  
+  # Tabla de datos
+  output$tabla_datos <- DT::renderDataTable({
+    req(datos())
+    muestra <- datos()
+    
+    df <- data.frame(
+      Índice = 1:min(200, length(muestra)),
+      Valor = round(muestra[1:min(200, length(muestra))], 6)
+    )
+    
+    DT::datatable(df, options = list(pageLength = 15, scrollY = "400px"))
+  })
+}
+
+# Ejecutar la aplicación
+shinyApp(ui = ui, server = server)
