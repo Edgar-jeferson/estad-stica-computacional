@@ -1,0 +1,295 @@
+library(shiny)
+library(ggplot2)
+library(dplyr)
+library(DT)
+
+# Función para interpretar el coeficiente de variación
+interpretar_cv <- function(cv) {
+  if (cv < 10) {
+    return("Muy baja dispersión relativa")
+  } else if (cv < 20) {
+    return("Baja dispersión relativa")
+  } else if (cv < 30) {
+    return("Moderada dispersión relativa")
+  } else if (cv < 50) {
+    return("Alta dispersión relativa")
+  } else {
+    return("Muy alta dispersión relativa")
+  }
+}
+
+# UI
+ui <- fluidPage(
+  titlePanel("Simulación: Distribución Normal y Coeficiente de Variación"),
+  
+  sidebarLayout(
+    sidebarPanel(
+      h4("Parámetros de la Simulación"),
+      numericInput("n_muestras", "Número de muestras:", 
+                   value = 500, min = 100, max = 10000, step = 100),
+      numericInput("media", "Media (μ):", 
+                   value = 20, min = 0, max = 100, step = 1),
+      numericInput("desv_std", "Desviación estándar (σ):", 
+                   value = 4, min = 0.1, max = 20, step = 0.1),
+      hr(),
+      actionButton("generar", "Generar Nueva Muestra", 
+                   class = "btn-primary", style = "width: 100%"),
+      br(), br(),
+      
+      h4("Información Teórica"),
+      p("El coeficiente de variación (CV) se calcula como:"),
+      p("CV = (σ/μ) × 100%"),
+      p("Para esta distribución teórica:"),
+      textOutput("cv_teorico"),
+      
+      hr(),
+      h4("Interpretación del CV:"),
+      tags$ul(
+        tags$li("< 10%: Muy baja dispersión"),
+        tags$li("10-20%: Baja dispersión"),
+        tags$li("20-30%: Moderada dispersión"),
+        tags$li("30-50%: Alta dispersión"),
+        tags$li("> 50%: Muy alta dispersión")
+      )
+    ),
+    
+    mainPanel(
+      tabsetPanel(
+        tabPanel("Resultados",
+                 fluidRow(
+                   column(6,
+                          h4("Estadísticas de la Muestra"),
+                          tableOutput("estadisticas"),
+                          br(),
+                          h4("Interpretación"),
+                          div(style = "background-color: #f8f9fa; padding: 15px; border-radius: 5px;",
+                              textOutput("interpretacion"))
+                   ),
+                   column(6,
+                          h4("Comparación Teórico vs Muestral"),
+                          tableOutput("comparacion")
+                   )
+                 ),
+                 br(),
+                 fluidRow(
+                   column(12,
+                          h4("Histograma con Curva Normal Teórica"),
+                          plotOutput("histograma", height = "400px")
+                   )
+                 )
+        ),
+        
+        tabPanel("Datos",
+                 h4("Datos Generados"),
+                 p("Primeras 100 observaciones de la muestra:"),
+                 DT::dataTableOutput("tabla_datos")
+        ),
+        
+        tabPanel("Análisis",
+                 h4("Análisis Detallado"),
+                 fluidRow(
+                   column(6,
+                          h5("Medidas de Tendencia Central"),
+                          plotOutput("boxplot", height = "300px")
+                   ),
+                   column(6,
+                          h5("Gráfico Q-Q Normal"),
+                          plotOutput("qqplot", height = "300px")
+                   )
+                 ),
+                 br(),
+                 fluidRow(
+                   column(12,
+                          h5("Resumen Estadístico Completo"),
+                          verbatimTextOutput("resumen_completo")
+                   )
+                 )
+        )
+      )
+    )
+  )
+)
+
+# Server
+server <- function(input, output, session) {
+  
+  # Datos reactivos
+  datos <- reactiveVal(NULL)
+  
+  # Generar datos iniciales
+  observe({
+    datos(rnorm(input$n_muestras, mean = input$media, sd = input$desv_std))
+  })
+  
+  # Generar nueva muestra
+  observeEvent(input$generar, {
+    datos(rnorm(input$n_muestras, mean = input$media, sd = input$desv_std))
+  })
+  
+  # Cálculos reactivos
+  estadisticas_calc <- reactive({
+    req(datos())
+    muestra <- datos()
+    
+    media_muestral <- mean(muestra)
+    desv_muestral <- sd(muestra)
+    cv_muestral <- (desv_muestral / media_muestral) * 100
+    
+    list(
+      media = media_muestral,
+      desv_std = desv_muestral,
+      cv = cv_muestral,
+      n = length(muestra),
+      min = min(muestra),
+      max = max(muestra),
+      q1 = quantile(muestra, 0.25),
+      mediana = median(muestra),
+      q3 = quantile(muestra, 0.75)
+    )
+  })
+  
+  # CV teórico
+  output$cv_teorico <- renderText({
+    cv_teorico <- (input$desv_std / input$media) * 100
+    paste("CV teórico =", round(cv_teorico, 2), "%")
+  })
+  
+  # Tabla de estadísticas
+  output$estadisticas <- renderTable({
+    req(estadisticas_calc())
+    stats <- estadisticas_calc()
+    
+    data.frame(
+      Estadística = c("Media", "Desviación Estándar", "Coeficiente de Variación", 
+                      "Mínimo", "Máximo", "Mediana"),
+      Valor = c(
+        round(stats$media, 3),
+        round(stats$desv_std, 3),
+        paste(round(stats$cv, 2), "%"),
+        round(stats$min, 3),
+        round(stats$max, 3),
+        round(stats$mediana, 3)
+      )
+    )
+  }, striped = TRUE, bordered = TRUE)
+  
+  # Comparación teórico vs muestral
+  output$comparacion <- renderTable({
+    req(estadisticas_calc())
+    stats <- estadisticas_calc()
+    
+    cv_teorico <- (input$desv_std / input$media) * 100
+    
+    data.frame(
+      Parámetro = c("Media", "Desviación Estándar", "Coeficiente de Variación"),
+      Teórico = c(
+        input$media,
+        input$desv_std,
+        paste(round(cv_teorico, 2), "%")
+      ),
+      Muestral = c(
+        round(stats$media, 3),
+        round(stats$desv_std, 3),
+        paste(round(stats$cv, 2), "%")
+      ),
+      Diferencia = c(
+        round(stats$media - input$media, 3),
+        round(stats$desv_std - input$desv_std, 3),
+        paste(round(stats$cv - cv_teorico, 2), "pp")
+      )
+    )
+  }, striped = TRUE, bordered = TRUE)
+  
+  # Interpretación
+  output$interpretacion <- renderText({
+    req(estadisticas_calc())
+    stats <- estadisticas_calc()
+    
+    interpretacion <- interpretar_cv(stats$cv)
+    
+    paste("Con un coeficiente de variación de", round(stats$cv, 2), "%, ",
+          "la muestra presenta", tolower(interpretacion), ".",
+          "Esto significa que la desviación estándar representa el",
+          round(stats$cv, 1), "% de la media, indicando que los datos",
+          ifelse(stats$cv < 20, "están relativamente concentrados alrededor de la media",
+                 ifelse(stats$cv < 30, "muestran una dispersión moderada",
+                        "presentan una dispersión considerable")), ".")
+  })
+  
+  # Histograma
+  output$histograma <- renderPlot({
+    req(datos())
+    muestra <- datos()
+    
+    # Crear secuencia para curva teórica
+    x_teorico <- seq(min(muestra) - 2, max(muestra) + 2, length.out = 200)
+    y_teorico <- dnorm(x_teorico, mean = input$media, sd = input$desv_std)
+    
+    # Convertir a data frame
+    df_muestra <- data.frame(valores = muestra)
+    df_teorico <- data.frame(x = x_teorico, y = y_teorico)
+    
+    ggplot(df_muestra, aes(x = valores)) +
+      geom_histogram(aes(y = ..density..), bins = 30, 
+                     fill = "lightblue", color = "black", alpha = 0.7) +
+      geom_line(data = df_teorico, aes(x = x, y = y), 
+                color = "red", size = 1.2, linetype = "dashed") +
+      geom_vline(xintercept = mean(muestra), color = "blue", linetype = "solid", size = 1) +
+      geom_vline(xintercept = input$media, color = "red", linetype = "dashed", size = 1) +
+      labs(title = "Histograma de la Muestra vs Distribución Teórica",
+           x = "Valores", y = "Densidad",
+           caption = "Línea azul: media muestral | Línea roja: media teórica | Curva roja: distribución teórica") +
+      theme_minimal() +
+      theme(plot.title = element_text(hjust = 0.5))
+  })
+  
+  # Boxplot
+  output$boxplot <- renderPlot({
+    req(datos())
+    muestra <- datos()
+    
+    df <- data.frame(valores = muestra, grupo = "Muestra")
+    
+    ggplot(df, aes(x = grupo, y = valores)) +
+      geom_boxplot(fill = "lightblue", alpha = 0.7) +
+      geom_hline(yintercept = input$media, color = "red", linetype = "dashed") +
+      labs(title = "Diagrama de Caja", x = "", y = "Valores") +
+      theme_minimal()
+  })
+  
+  # Q-Q Plot
+  output$qqplot <- renderPlot({
+    req(datos())
+    muestra <- datos()
+    
+    df <- data.frame(sample = muestra)
+    
+    ggplot(df, aes(sample = sample)) +
+      stat_qq(color = "blue", alpha = 0.6) +
+      stat_qq_line(color = "red", linetype = "dashed") +
+      labs(title = "Gráfico Q-Q Normal", x = "Cuantiles Teóricos", y = "Cuantiles Muestrales") +
+      theme_minimal()
+  })
+  
+  # Tabla de datos
+  output$tabla_datos <- DT::renderDataTable({
+    req(datos())
+    muestra <- datos()
+    
+    df <- data.frame(
+      Índice = 1:min(100, length(muestra)),
+      Valor = round(muestra[1:min(100, length(muestra))], 4)
+    )
+    
+    DT::datatable(df, options = list(pageLength = 10, scrollY = "400px"))
+  })
+  
+  # Resumen completo
+  output$resumen_completo <- renderText({
+    req(datos())
+    capture.output(summary(datos()))
+  })
+}
+
+# Ejecutar la aplicación
+shinyApp(ui = ui, server = server)
